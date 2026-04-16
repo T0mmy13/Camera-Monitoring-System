@@ -8,6 +8,8 @@ class BaseTable {
         this.originalData = [];
         this.currentFilters = {};
         this.currentSort = { column: null, order: null };
+        this.currentEditId = null;
+        this._lockInterval = null;
     }
     
     async loadData() {
@@ -198,7 +200,11 @@ class BaseTable {
         let columnsToDisplay = window.CCTV.Constants.COLUMN_ORDER[this.tableName] || 
             Object.keys(sortedData[0] || {}).filter(col => !window.CCTV.Constants.HIDDEN_COLUMNS.includes(col));
         
-        let html = '<table id="data-table"><thead><tr>';
+        let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
+            📊 Найдено записей: ${sortedData.length}
+        </div>`;
+        
+        html += '<table id="data-table"><thead><tr>';
         columnsToDisplay.forEach(col => {
             const displayName = window.CCTV.Constants.COLUMN_NAMES[col] || col;
             const canFilter = !window.CCTV.Constants.NO_FILTER_COLUMNS[this.tableName]?.includes(col);
@@ -217,7 +223,7 @@ class BaseTable {
                 </th>`;
             }
         });
-        html += '<tr></thead><tbody>';
+        html += '</tr></thead><tbody>';
         
         for (const row of sortedData) {
             html += '<tr data-id="' + row.id + '">';
@@ -237,7 +243,6 @@ class BaseTable {
         
         html += '</tbody></table>';
         
-        // Добавляем информацию о количестве записей
         const originalCount = this.originalData.length;
         const totalCount = sortedData.length;
         
@@ -248,6 +253,46 @@ class BaseTable {
         html += countHtml;
         
         document.getElementById('table-content').innerHTML = html;
+    }
+    
+    // ========== Методы для блокировки записей ==========
+    async acquireLock(id) {
+        const response = await fetch(`/api/lock/${this.tableName}/${id}`, { method: 'POST' });
+        if (response.status === 423) {
+            const data = await response.json();
+            window.CCTV.UI.showMessage(`⚠️ Запись редактируется пользователем ${data.locked_by}`, 'error');
+            return false;
+        }
+        if (!response.ok) {
+            window.CCTV.UI.showMessage('Ошибка блокировки записи', 'error');
+            return false;
+        }
+        return true;
+    }
+
+    async releaseLock(id) {
+        await fetch(`/api/unlock/${this.tableName}/${id}`, { method: 'DELETE' });
+    }
+
+    startLockRenewal(id) {
+        this.stopLockRenewal();
+        this._lockInterval = setInterval(() => this.acquireLock(id), 2 * 60 * 1000);
+    }
+
+    stopLockRenewal() {
+        if (this._lockInterval) {
+            clearInterval(this._lockInterval);
+            this._lockInterval = null;
+        }
+    }
+
+    // Метод для очистки блокировки при закрытии
+    cleanupLock() {
+        if (this.currentEditId) {
+            this.releaseLock(this.currentEditId);
+            this.stopLockRenewal();
+            this.currentEditId = null;
+        }
     }
     
     showAddForm() {

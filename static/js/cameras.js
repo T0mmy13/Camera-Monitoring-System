@@ -222,7 +222,11 @@ class CamerasTable extends window.CCTV.BaseTable {
             window.CCTV.UI.showMessage('У вас нет прав на редактирование', 'error');
             return;
         }
-        
+
+        // Запрашиваем блокировку
+        const locked = await this.acquireLock(id);
+        if (!locked) return;
+
         const data = await window.CCTV.API.fetchData(this.tableName, id);
         document.getElementById('modal-title').textContent = 'Редактирование камеры';
         
@@ -257,6 +261,15 @@ class CamerasTable extends window.CCTV.BaseTable {
         
         document.getElementById('modal-fields').innerHTML = fieldsHtml;
         document.getElementById('modal').style.display = 'flex';
+
+        this.currentEditId = id;
+        this.startLockRenewal(id);
+
+        const originalClose = window.CCTV.UI.closeModal;
+        window.CCTV.UI.closeModal = () => {
+            this.cleanupLock();
+            originalClose.call(window.CCTV.UI);
+        };
         
         document.getElementById('edit-form').onsubmit = async (e) => {
             e.preventDefault();
@@ -268,6 +281,7 @@ class CamerasTable extends window.CCTV.BaseTable {
             
             const result = await window.CCTV.API.saveData(this.tableName, id, submitData);
             if (result.success) {
+                this.cleanupLock();
                 window.CCTV.UI.closeModal();
                 window.CCTV.loadTable(this.tableName);
                 window.CCTV.UI.showMessage('Запись успешно обновлена', 'success');

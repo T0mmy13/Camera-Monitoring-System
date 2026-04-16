@@ -375,7 +375,6 @@ class CameraReportTable extends window.CCTV.BaseTable {
         });
         cameraSelect.innerHTML = options;
         
-        // Скрываем информацию о последней записи при смене регистратора
         const lastReportDiv = document.getElementById('last-report-info');
         if (lastReportDiv) lastReportDiv.style.display = 'none';
     }
@@ -540,6 +539,10 @@ class CameraReportTable extends window.CCTV.BaseTable {
             window.CCTV.UI.showMessage('У вас нет прав на редактирование', 'error');
             return;
         }
+
+        // Запрашиваем блокировку
+        const locked = await this.acquireLock(id);
+        if (!locked) return;
         
         try {
             const record = await window.CCTV.API.fetchData(this.tableName, id);
@@ -591,6 +594,15 @@ class CameraReportTable extends window.CCTV.BaseTable {
             }
             
             document.getElementById('modal').style.display = 'flex';
+
+            this.currentEditId = id;
+            this.startLockRenewal(id);
+
+            const originalClose = window.CCTV.UI.closeModal;
+            window.CCTV.UI.closeModal = () => {
+                this.cleanupLock();
+                originalClose.call(window.CCTV.UI);
+            };
             
             document.getElementById('edit-form').onsubmit = async (e) => {
                 e.preventDefault();
@@ -600,6 +612,7 @@ class CameraReportTable extends window.CCTV.BaseTable {
         } catch (error) {
             console.error('Error loading record for edit:', error);
             window.CCTV.UI.showMessage('Ошибка загрузки записи', 'error');
+            this.cleanupLock();
         }
     }
     
@@ -675,6 +688,7 @@ class CameraReportTable extends window.CCTV.BaseTable {
             
             await Promise.all(promises);
             
+            this.cleanupLock();
             window.CCTV.UI.closeModal();
             window.CCTV.loadTable(this.tableName);
             window.CCTV.UI.showMessage('Запись успешно обновлена', 'success');
@@ -682,9 +696,9 @@ class CameraReportTable extends window.CCTV.BaseTable {
         } catch (error) {
             console.error('Error updating report:', error);
             window.CCTV.UI.showMessage('Ошибка при обновлении', 'error');
+            this.cleanupLock();
         }
     }
-    
     
     async exportToExcel() {
         if (Object.keys(window.CCTV.AppState.camerasCache).length === 0 || Object.keys(window.CCTV.AppState.registratorsCache).length === 0) {

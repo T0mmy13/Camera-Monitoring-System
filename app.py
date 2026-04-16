@@ -60,6 +60,9 @@ ALLOWED_TABLES = {
 # Rate limiting
 rate_limits = defaultdict(list)
 
+# Блокировка сессий пользователей (in‑memory)
+active_sessions = {}   # username -> session_token
+
 def rate_limit(max_requests=100, time_window=60):
     """Декоратор для ограничения количества запросов"""
     def decorator(f):
@@ -215,6 +218,11 @@ def login_required(f):
     def wrapper(*args, **kwargs):
         if 'username' not in session:
             return jsonify({'error': 'Not authenticated'}), 401
+        username = session['username']
+        # Проверяем, что сессия активна
+        if username not in active_sessions or active_sessions[username] != session.get('session_token'):
+            session.clear()
+            return jsonify({'error': 'Session expired or logged in elsewhere'}), 401
         return f(*args, **kwargs)
     return wrapper
 
@@ -235,7 +243,7 @@ def can_edit_table(table_name, role):
     return False
 
 def init_lock_table():
-    """Создание таблицы блокировок"""
+    """Создание таблицы блокировок (уже существует, оставляем для совместимости)"""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -375,6 +383,10 @@ def login():
                 session['user_id'] = user['id']
                 session['username'] = user['username']
                 session['role'] = user['role']
+                # Генерируем токен сессии и сохраняем в памяти
+                token = secrets.token_urlsafe(16)
+                active_sessions[username] = token
+                session['session_token'] = token
                 log_action(username, "Успешный вход в систему")
                 app.logger.info(f'Successful login: {username}')
                 return redirect(url_for('index'))
@@ -396,6 +408,8 @@ def index():
 @app.route('/logout')
 def logout():
     username = session.get('username')
+    if username and username in active_sessions:
+        del active_sessions[username]
     log_action(username, "Выход из системы")
     app.logger.info(f'Logout: {username}')
     session.clear()
@@ -744,7 +758,7 @@ def export_action_log_excel():
         download_name=f'action_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
     )
 
-# Инициализация таблицы блокировок при запуске
+# Инициализация таблицы блокировок при запуске (уже существует)
 init_lock_table()
 
 if __name__ == '__main__':
