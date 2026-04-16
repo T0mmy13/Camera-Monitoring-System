@@ -1,0 +1,105 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+.env
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+venv_*/
+env/
+ENV/
+.env/
+.venv/
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+
+# Логи (все логи)
+logs/
+*.log
+server.log
+app.log
+*.log.*
+
+# Бэкапы базы данных
+backups/
+*.sql
+*.backup
+*.dump
+backup_*.sql
+*.bak
+
+# Временные файлы сервера
+flask.pid
+*.pid
+instance/
+*.db
+*.db-journal
+
+# Конфиги с паролями (если не хотите коммитить)
+# config.ini - раскомментируйте если не хотите коммитить конфиг с паролями
+# .env - уже выше
+
+# Excel файлы (если создаются временные)
+*.xlsx
+*.xls
+temp_*.xlsx
+
+# Отчёты и экспорты
+exports/
+temp/
+
+# Файлы блокировок
+*.lock
+*.LOCK
+
+# Файлы миграций (если не хотите коммитить выполненную миграцию)
+# migrations/*.done
+
+# Системные файлы Windows
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Системные файлы macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Файлы отладки
+*.pdb
+*.pydevproject
+
+# Файлы покрытия кода
+.coverage
+htmlcov/
+.tox/
+.nox/
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/

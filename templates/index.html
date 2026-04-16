@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Журнал видеонаблюдения</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1>Журнал видеонаблюдения</h1>
+        </div>
+        <div class="header-center">
+            <div class="table-selector" id="table-selector">
+                <!-- Кнопки будут динамически добавлены через JS -->
+            </div>
+        </div>
+        <div class="user-info">
+            <span>Пользователь: {{ session.username }} ({% if session.role == 'admin' %}Администратор{% elif session.role == 'editor' %}Редактор{% else %}Пользователь{% endif %})</span>
+            <a href="/logout" class="logout-btn" title="Выход">🚪</a>
+        </div>
+    </div>
+    <div class="container">
+        <div id="message" class="message"></div>
+        
+        <div id="filter-buttons-container" style="display: none;"></div>
+        
+        <div class="table-container">
+            <div id="table-content">
+                <p style="padding: 20px; text-align: center;">Загрузка данных...</p>
+            </div>
+        </div>
+    </div>
+    
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <h3 id="modal-title">Редактирование</h3>
+            <form id="edit-form">
+                <div id="modal-fields"></div>
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="window.CCTV.closeModal()">Отмена</button>
+                    <button type="submit" class="save-btn">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="user-info" data-role="{{ session.role }}" data-username="{{ session.username }}" style="display: none;"></div>
+    
+    <!-- JS modules - ВАЖНЫЙ ПОРЯДОК, НЕ ПОДКЛЮЧАЙТЕ qwe.js -->
+    <script src="{{ url_for('static', filename='js/core.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/table-base.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/camera-report.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/registrators.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/cameras.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/users.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/action-log.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
