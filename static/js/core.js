@@ -1,22 +1,18 @@
 /**
  * core.js - Ядро приложения
- * Константы, глобальное состояние, API вызовы, утилиты
  */
 
-// ==================== КОНСТАНТЫ ====================
 const CONSTANTS = {
     ROLE_TABLE_ACCESS: {
         'admin': ['cam_registrators', 'cam_camers', 'cam_camera_report', 'cam_users', 'cam_action_log'],
         'editor': ['cam_registrators', 'cam_camers', 'cam_camera_report'],
         'user': ['cam_camera_report']
     },
-    
     ROLE_EDIT_ACCESS: {
         'admin': ['cam_registrators', 'cam_camers', 'cam_camera_report', 'cam_users'],
         'editor': ['cam_camera_report'],
         'user': []
     },
-    
     COLUMN_NAMES: {
         'registrator_full': 'Регистратор',
         'ip': 'Ip',
@@ -45,7 +41,6 @@ const CONSTANTS = {
         'old_value': 'Было',
         'new_value': 'Стало'
     },
-    
     COLUMN_ORDER: {
         'cam_camers': ['idreg', 'port', 'type', 'location', 'expansion', 'comment'],
         'cam_registrators': ['registrator_full', 'ip', 'type', 'count_ports', 'extensions', 'comment', 'condition'],
@@ -53,8 +48,6 @@ const CONSTANTS = {
         'cam_action_log': ['action_date', 'action_time', 'user', 'action', 'table_name', 'record_id', 'field_name', 'old_value', 'new_value'],
         'cam_camera_report': ['id_cam', 'condition', 'breakdown', 'comment', 'recording_date']
     },
-    
-    // Колонки, для которых НЕ показываем фильтры в выпадающем меню
     NO_FILTER_COLUMNS: {
         'cam_registrators': ['registrator_full', 'ip', 'comment'],
         'cam_camers': ['comment', 'idreg', 'port', 'location'],
@@ -62,13 +55,11 @@ const CONSTANTS = {
         'cam_action_log': ['action_date', 'action_time', 'user', 'action', 'table_name', 'record_id', 'field_name', 'old_value', 'new_value'],
         'cam_camera_report': ['id_cam', 'breakdown', 'comment']
     },
-    
     CONDITION_OPTIONS: ['Исправна', 'Частично не исправна', 'Неисправна', 'Отключена', 'Проба'],
     BREAKDOWN_OPTIONS: ['Ч/б', 'Нет изображения', 'Пикселит', 'Помехи', 'Шум', 'Отдаёт фиолетовым', 'Плохая видимость'],
     HIDDEN_COLUMNS: ['id', 'ap', 'id_reg_on_ap', 'version', 'last_editor']
 };
 
-// ==================== ГЛОБАЛЬНОЕ СОСТОЯНИЕ ====================
 const AppState = {
     currentTable: 'cam_camera_report',
     isAdmin: false,
@@ -81,10 +72,6 @@ const AppState = {
     registratorsCache: {},
     currentApFilter: null,
     currentRegistratorFilters: new Set(),
-    currentEditVersion: null,
-    currentLockInterval: null,
-    currentEditId: null,
-    currentEditTable: null,
     
     reportFilters: {
         startDate: '',
@@ -105,7 +92,6 @@ const AppState = {
     saveState() {
         try {
             localStorage.setItem('cctv_currentTable', JSON.stringify(this.currentTable));
-            
             const filtersToSave = {
                 startDate: this.reportFilters.startDate,
                 endDate: this.reportFilters.endDate,
@@ -134,7 +120,6 @@ const AppState = {
                     this.currentTable = parsed;
                 }
             }
-            
             const savedReportFilters = localStorage.getItem('cctv_reportFilters');
             if (savedReportFilters) {
                 const parsed = JSON.parse(savedReportFilters);
@@ -144,25 +129,20 @@ const AppState = {
                 this.reportFilters.registratorFilters = new Set(parsed.registratorFilters || []);
                 this.reportFilters.conditionFilters = new Set(parsed.conditionFilters || []);
             }
-            
             const savedSort = localStorage.getItem('cctv_currentSort');
             if (savedSort) this.currentSort = JSON.parse(savedSort);
-            
             const savedApFilter = localStorage.getItem('cctv_currentApFilter');
             if (savedApFilter && savedApFilter !== 'null') {
                 this.currentApFilter = parseInt(savedApFilter);
             } else {
                 this.currentApFilter = null;
             }
-            
             const savedRegFilters = localStorage.getItem('cctv_currentRegistratorFilters');
             if (savedRegFilters) {
                 this.currentRegistratorFilters = new Set(JSON.parse(savedRegFilters));
             }
-            
             const savedFilters = localStorage.getItem('cctv_currentFilters');
             if (savedFilters) this.currentFilters = JSON.parse(savedFilters);
-            
             const savedActionLogFilters = localStorage.getItem('cctv_actionLogFilters');
             if (savedActionLogFilters) {
                 this.actionLogFilters = { ...this.actionLogFilters, ...JSON.parse(savedActionLogFilters) };
@@ -173,14 +153,12 @@ const AppState = {
     }
 };
 
-// ==================== API ВЫЗОВЫ ====================
 const API = {
     async fetchData(tableName, id = null) {
         const url = id ? `/api/data/${tableName}/${id}` : `/api/data/${tableName}`;
         const response = await fetch(url);
         return response.json();
     },
-    
     async saveData(tableName, id, data) {
         const response = await fetch(`/api/data/${tableName}/${id}`, {
             method: 'PUT',
@@ -189,12 +167,10 @@ const API = {
         });
         return response.json();
     },
-    
     async deleteData(tableName, id) {
         const response = await fetch(`/api/data/${tableName}/${id}`, { method: 'DELETE' });
         return response.json();
     },
-    
     async createData(tableName, data) {
         const response = await fetch(`/api/data/${tableName}`, {
             method: 'POST',
@@ -203,7 +179,6 @@ const API = {
         });
         return response.json();
     },
-    
     async loadCamerasCache() {
         const response = await fetch('/api/public/cameras');
         const data = await response.json();
@@ -211,7 +186,6 @@ const API = {
         data.forEach(cam => { AppState.camerasCache[cam.id] = cam; });
         return AppState.camerasCache;
     },
-    
     async loadRegistratorsCache() {
         const response = await fetch('/api/public/registrators');
         const data = await response.json();
@@ -220,28 +194,9 @@ const API = {
             AppState.registratorsCache[reg.id] = `АП${reg.ap}_${reg.id_reg_on_ap}`;
         });
         return data;
-    },
-    
-    async acquireLock(tableName, recordId) {
-        const response = await fetch(`/api/lock/${tableName}/${recordId}`, { method: 'POST' });
-        if (response.status === 423) {
-            const data = await response.json();
-            UI.showMessage(`⚠️ Запись редактируется пользователем ${data.locked_by}`, 'error');
-            return false;
-        }
-        return true;
-    },
-    
-    releaseLock(tableName, recordId) {
-        if (AppState.currentLockInterval) {
-            clearInterval(AppState.currentLockInterval);
-            AppState.currentLockInterval = null;
-        }
-        return fetch(`/api/unlock/${tableName}/${recordId}`, { method: 'DELETE' }).catch(console.error);
     }
 };
 
-// ==================== UI УТИЛИТЫ ====================
 const UI = {
     showMessage(text, type) {
         const msg = document.getElementById('message');
@@ -251,23 +206,14 @@ const UI = {
         msg.style.display = 'block';
         setTimeout(() => msg.style.display = 'none', 3000);
     },
-    
     closeModal() {
-        if (AppState.currentEditId && AppState.currentEditTable) {
-            API.releaseLock(AppState.currentEditTable, AppState.currentEditId);
-            AppState.currentEditId = null;
-            AppState.currentEditTable = null;
-            AppState.currentEditVersion = null;
-        }
         const modal = document.getElementById('modal');
         if (modal) modal.style.display = 'none';
     },
-    
     getTodayDate() {
         const today = new Date();
         return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     },
-    
     formatDateToDMY(dateStr) {
         if (!dateStr) return '';
         if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
@@ -283,7 +229,6 @@ const UI = {
         } catch(e) {}
         return dateStr;
     },
-    
     normalizeDate(dateValue) {
         if (!dateValue) return '';
         if (typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return dateValue;
@@ -297,11 +242,9 @@ const UI = {
         }
         return String(dateValue);
     },
-    
     getRegistratorFullName(registrator) {
         return `АП${registrator.ap}_${registrator.id_reg_on_ap}`;
     },
-    
     getUniqueAPsFromCache() {
         const aps = new Set();
         Object.values(AppState.registratorsCache).forEach(regName => {
@@ -310,7 +253,6 @@ const UI = {
         });
         return Array.from(aps).sort((a, b) => a - b);
     },
-    
     getButtonText(tableName) {
         const names = {
             'cam_registrators': 'Регистраторы',
@@ -321,17 +263,14 @@ const UI = {
         };
         return names[tableName] || tableName;
     },
-    
     canEditCurrentTable() {
         const editTables = CONSTANTS.ROLE_EDIT_ACCESS[AppState.userRole] || [];
         return editTables.includes(AppState.currentTable);
     },
-    
     canViewTable(tableName) {
         const availableTables = CONSTANTS.ROLE_TABLE_ACCESS[AppState.userRole] || [];
         return availableTables.includes(tableName);
     },
-    
     initUserRole() {
         const userInfo = document.getElementById('user-info');
         if (userInfo) {
@@ -339,7 +278,6 @@ const UI = {
             AppState.isAdmin = (AppState.userRole === 'admin');
         }
     },
-    
     escapeHtml(str) {
         if (!str) return '';
         return String(str)

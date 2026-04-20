@@ -1,5 +1,5 @@
 /**
- * table-base.js - Базовый класс для всех таблиц
+ * table-base.js - Базовый класс для всех таблиц (оптимистическая блокировка через version)
  */
 
 class BaseTable {
@@ -9,7 +9,7 @@ class BaseTable {
         this.currentFilters = {};
         this.currentSort = { column: null, order: null };
         this.currentEditId = null;
-        this._lockInterval = null;
+        this.currentEditVersion = null;
     }
     
     async loadData() {
@@ -33,7 +33,6 @@ class BaseTable {
             }).filter(v => v !== null))];
             return dates.sort().reverse();
         }
-        
         if (this.tableName === 'cam_registrators' && column === 'registrator_full') {
             return [...new Set(this.originalData.map(row => row[column]))]
                 .filter(v => v !== null && v !== '')
@@ -49,7 +48,6 @@ class BaseTable {
                     return parsedA.id_reg - parsedB.id_reg;
                 });
         }
-        
         return [...new Set(this.originalData.map(row => row[column]))]
             .filter(v => v !== null && v !== '')
             .sort();
@@ -74,13 +72,11 @@ class BaseTable {
     
     applySorting(data) {
         if (!this.currentSort.column || !this.currentSort.order) return data;
-        
         return [...data].sort((a, b) => {
             let valA = a[this.currentSort.column];
             let valB = b[this.currentSort.column];
             if (valA === null) valA = '';
             if (valB === null) valB = '';
-            
             if (this.tableName === 'cam_registrators' && this.currentSort.column === 'registrator_full') {
                 const parseReg = (str) => {
                     const match = str.match(/АП(\d+)_(\d+)/);
@@ -94,17 +90,14 @@ class BaseTable {
                 }
                 return this.currentSort.order === 'asc' ? parsedA.id_reg - parsedB.id_reg : parsedB.id_reg - parsedA.id_reg;
             }
-            
             if (this.tableName === 'cam_action_log' && this.currentSort.column === 'time_action') {
                 valA = new Date(valA).getTime();
                 valB = new Date(valB).getTime();
                 return this.currentSort.order === 'asc' ? valA - valB : valB - valA;
             }
-            
             if (typeof valA === 'number' && typeof valB === 'number') {
                 return this.currentSort.order === 'asc' ? valA - valB : valB - valA;
             }
-            
             valA = String(valA).toLowerCase();
             valB = String(valB).toLowerCase();
             if (valA < valB) return this.currentSort.order === 'asc' ? -1 : 1;
@@ -116,22 +109,18 @@ class BaseTable {
     showColumnMenu(event, column) {
         const noFilterColumns = window.CCTV.Constants.NO_FILTER_COLUMNS[this.tableName] || [];
         if (noFilterColumns.includes(column)) return;
-        
         event.stopPropagation();
         const existingMenu = document.querySelector('.dropdown-menu');
         if (existingMenu) existingMenu.remove();
-        
         const buttonRect = event.target.getBoundingClientRect();
         const menu = document.createElement('div');
         menu.className = 'dropdown-menu';
         menu.style.left = buttonRect.left + 'px';
         menu.style.top = (buttonRect.bottom + window.scrollY) + 'px';
-        
         let menuHtml = `<div class="dropdown-header">Фильтр по значению</div>
             <div class="dropdown-item" onclick="window.CCTV.setFilter('${column}', null)">
                 Все значения ${!this.currentFilters[column] ? '✓' : ''}
             </div>`;
-        
         const uniqueValues = this.getUniqueValuesForColumn(column);
         uniqueValues.forEach(value => {
             let filterValue = value;
@@ -146,10 +135,8 @@ class BaseTable {
                 ${window.CCTV.UI.escapeHtml(displayValue)} ${isActive ? '✓' : ''}
             </div>`;
         });
-        
         menu.innerHTML = menuHtml;
         document.body.appendChild(menu);
-        
         setTimeout(() => {
             document.addEventListener('click', function closeMenu(e) {
                 if (!menu.contains(e.target) && e.target !== event.target) {
@@ -191,24 +178,19 @@ class BaseTable {
         let workingData = [...this.originalData];
         let filteredData = this.applyFilters(workingData);
         let sortedData = this.applySorting(filteredData);
-        
         if (sortedData.length === 0) {
             document.getElementById('table-content').innerHTML = '<p style="padding: 20px; text-align: center;">Нет данных</p>';
             return;
         }
-        
         let columnsToDisplay = window.CCTV.Constants.COLUMN_ORDER[this.tableName] || 
             Object.keys(sortedData[0] || {}).filter(col => !window.CCTV.Constants.HIDDEN_COLUMNS.includes(col));
-        
         let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
             📊 Найдено записей: ${sortedData.length}
         </div>`;
-        
         html += '<table id="data-table"><thead><tr>';
         columnsToDisplay.forEach(col => {
             const displayName = window.CCTV.Constants.COLUMN_NAMES[col] || col;
             const canFilter = !window.CCTV.Constants.NO_FILTER_COLUMNS[this.tableName]?.includes(col);
-            
             if (canFilter) {
                 html += `<th style="position: relative;">
                     <button class="column-btn" onclick="window.CCTV.showColumnMenu(event, '${col}')" style="cursor: pointer;">
@@ -224,82 +206,34 @@ class BaseTable {
             }
         });
         html += '</tr></thead><tbody>';
-        
         for (const row of sortedData) {
             html += '<tr data-id="' + row.id + '">';
             for (const col of columnsToDisplay) {
                 let value = row[col];
                 if (value === null) value = '';
-                
                 if (this.tableName === 'cam_users' && col === 'password') {
                     html += '<td>••••••</td>';
                     continue;
                 }
-                
                 html += `<td>${window.CCTV.UI.escapeHtml(value)}</td>`;
             }
             html += '</tr>';
         }
-        
         html += '</tbody></table>';
-        
         const originalCount = this.originalData.length;
         const totalCount = sortedData.length;
-        
         let countHtml = `<div style="padding: 10px 15px; background: #f8f9fa; border-top: 1px solid #ddd; border-radius: 0 0 8px 8px; font-size: 13px; color: #555;">
             📊 Показано записей: ${totalCount} из ${originalCount}
         </div>`;
-        
         html += countHtml;
-        
         document.getElementById('table-content').innerHTML = html;
-    }
-    
-    // ========== Методы для блокировки записей ==========
-    async acquireLock(id) {
-        const response = await fetch(`/api/lock/${this.tableName}/${id}`, { method: 'POST' });
-        if (response.status === 423) {
-            const data = await response.json();
-            window.CCTV.UI.showMessage(`⚠️ Запись редактируется пользователем ${data.locked_by}`, 'error');
-            return false;
-        }
-        if (!response.ok) {
-            window.CCTV.UI.showMessage('Ошибка блокировки записи', 'error');
-            return false;
-        }
-        return true;
-    }
-
-    async releaseLock(id) {
-        await fetch(`/api/unlock/${this.tableName}/${id}`, { method: 'DELETE' });
-    }
-
-    startLockRenewal(id) {
-        this.stopLockRenewal();
-        this._lockInterval = setInterval(() => this.acquireLock(id), 2 * 60 * 1000);
-    }
-
-    stopLockRenewal() {
-        if (this._lockInterval) {
-            clearInterval(this._lockInterval);
-            this._lockInterval = null;
-        }
-    }
-
-    // Метод для очистки блокировки при закрытии
-    cleanupLock() {
-        if (this.currentEditId) {
-            this.releaseLock(this.currentEditId);
-            this.stopLockRenewal();
-            this.currentEditId = null;
-        }
     }
     
     showAddForm() {
         window.CCTV.UI.showMessage('Форма добавления не реализована для этой таблицы', 'error');
     }
     
-    showEditForm(id) {
+    async showEditForm(id) {
         window.CCTV.UI.showMessage('Форма редактирования не реализована для этой таблицы', 'error');
     }
     
@@ -308,7 +242,6 @@ class BaseTable {
             window.CCTV.UI.showMessage('У вас нет прав на удаление', 'error');
             return;
         }
-        
         const result = await window.CCTV.API.deleteData(this.tableName, id);
         if (result.success) {
             window.CCTV.loadTable(this.tableName);

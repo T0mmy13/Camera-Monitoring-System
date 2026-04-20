@@ -1,6 +1,5 @@
 /**
  * action-log.js - Таблица журнала действий
- * Только для просмотра, без редактирования
  */
 
 class ActionLogTable extends window.CCTV.BaseTable {
@@ -18,7 +17,6 @@ class ActionLogTable extends window.CCTV.BaseTable {
     
     applyActionLogFilters(data) {
         let filtered = [...data];
-        
         if (this.actionLogFilters.startDate) {
             const start = new Date(this.actionLogFilters.startDate);
             filtered = filtered.filter(row => {
@@ -28,7 +26,6 @@ class ActionLogTable extends window.CCTV.BaseTable {
                 return rowDate >= start;
             });
         }
-        
         if (this.actionLogFilters.endDate) {
             const end = new Date(this.actionLogFilters.endDate);
             filtered = filtered.filter(row => {
@@ -38,19 +35,15 @@ class ActionLogTable extends window.CCTV.BaseTable {
                 return rowDate <= end;
             });
         }
-        
         if (this.actionLogFilters.userFilter) {
             filtered = filtered.filter(row => row.user === this.actionLogFilters.userFilter);
         }
-        
         if (this.actionLogFilters.actionFilter) {
             filtered = filtered.filter(row => row.action === this.actionLogFilters.actionFilter);
         }
-        
         if (this.actionLogFilters.tableFilter) {
             filtered = filtered.filter(row => row.table_name === this.actionLogFilters.tableFilter);
         }
-        
         return filtered;
     }
     
@@ -59,23 +52,18 @@ class ActionLogTable extends window.CCTV.BaseTable {
         workingData = this.applyActionLogFilters(workingData);
         let filteredData = this.applyFilters(workingData);
         let sortedData = this.applySorting(filteredData);
-        
         if (sortedData.length === 0) {
             document.getElementById('table-content').innerHTML = '<p style="padding: 20px; text-align: center;">Нет данных</p>';
             return;
         }
-        
         const columnsToDisplay = window.CCTV.Constants.COLUMN_ORDER['cam_action_log'];
-        
         let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
             📊 Найдено записей: ${sortedData.length}
         </div>`;
-        
         html += '<table id="data-table"><thead><tr>';
         columnsToDisplay.forEach(col => {
             const displayName = window.CCTV.Constants.COLUMN_NAMES[col] || col;
             const canFilter = !window.CCTV.Constants.NO_FILTER_COLUMNS[this.tableName]?.includes(col);
-            
             if (canFilter) {
                 html += `<th style="position: relative;">
                     <button class="column-btn" onclick="window.CCTV.showColumnMenu(event, '${col}')" style="cursor: pointer;">
@@ -90,14 +78,12 @@ class ActionLogTable extends window.CCTV.BaseTable {
                 </th>`;
             }
         });
-        html += '<tr></thead><tbody>';
-        
+        html += '</tr></thead><tbody>';
         for (const row of sortedData) {
             html += '<tr data-id="' + row.id + '">';
             for (const col of columnsToDisplay) {
                 let value = row[col];
                 if (value === null) value = '';
-                
                 if (col === 'action' && row.action) {
                     let details = [];
                     if (row.table_name) details.push(`Таблица: ${row.table_name}`);
@@ -105,34 +91,27 @@ class ActionLogTable extends window.CCTV.BaseTable {
                     if (row.field_name) details.push(`Поле: ${row.field_name}`);
                     if (row.old_value && row.old_value !== '') details.push(`Было: ${row.old_value}`);
                     if (row.new_value && row.new_value !== '') details.push(`Стало: ${row.new_value}`);
-                    
                     if (details.length) {
                         value = `${row.action} (${details.join(', ')})`;
                     }
                 }
-                
                 html += `<td>${window.CCTV.UI.escapeHtml(value)}</td>`;
             }
             html += '</tr>';
         }
-        
-        html += '</tbody></tr>';
-        
+        html += '</tbody></table>';
         document.getElementById('table-content').innerHTML = html;
     }
     
     buildFiltersUI() {
         const container = document.getElementById('filter-buttons-container');
         if (!container) return;
-        
         const today = window.CCTV.UI.getTodayDate();
         if (!this.actionLogFilters.startDate) this.actionLogFilters.startDate = today;
         if (!this.actionLogFilters.endDate) this.actionLogFilters.endDate = today;
-        
         const users = [...new Set(this.originalData.map(row => row.user).filter(v => v))];
         const actions = [...new Set(this.originalData.map(row => row.action).filter(v => v))];
         const tables = [...new Set(this.originalData.map(row => row.table_name).filter(v => v))];
-        
         let html = `
             <div class="filter-row" style="flex: 1;">
                 <div class="filter-item">
@@ -165,7 +144,6 @@ class ActionLogTable extends window.CCTV.BaseTable {
             </div>
             <button class="reset-filters-icon" onclick="window.resetAllFilters()" title="Сбросить все фильтры">↻</button>
         `;
-        
         container.innerHTML = html;
         container.style.display = 'flex';
         container.style.flexWrap = 'wrap';
@@ -181,9 +159,7 @@ class ActionLogTable extends window.CCTV.BaseTable {
     updateDateFilter() {
         const startDate = document.getElementById('action-start-date').value;
         const endDate = document.getElementById('action-end-date').value;
-        
         if (startDate && endDate && startDate > endDate) return;
-        
         this.actionLogFilters.startDate = startDate;
         this.actionLogFilters.endDate = endDate;
         window.CCTV.AppState.actionLogFilters = this.actionLogFilters;
@@ -195,7 +171,6 @@ class ActionLogTable extends window.CCTV.BaseTable {
         const userFilter = document.getElementById('action-user-filter').value;
         const actionFilter = document.getElementById('action-action-filter').value;
         const tableFilter = document.getElementById('action-table-filter').value;
-        
         this.actionLogFilters.userFilter = userFilter;
         this.actionLogFilters.actionFilter = actionFilter;
         this.actionLogFilters.tableFilter = tableFilter;
@@ -203,19 +178,16 @@ class ActionLogTable extends window.CCTV.BaseTable {
         window.CCTV.loadTable(this.tableName);
         window.CCTV.AppState.saveState();
     }
-
     
     async exportToExcel() {
         let workingData = [...this.originalData];
         workingData = this.applyActionLogFilters(workingData);
         let filteredData = this.applyFilters(workingData);
         let sortedData = this.applySorting(filteredData);
-        
         if (sortedData.length === 0) {
             window.CCTV.UI.showMessage('Нет данных для экспорта', 'error');
             return;
         }
-        
         const exportData = sortedData.map(row => ({
             'Дата': row.action_date || '',
             'Время': row.action_time || '',
@@ -227,23 +199,35 @@ class ActionLogTable extends window.CCTV.BaseTable {
             'Было': row.old_value || '',
             'Стало': row.new_value || ''
         }));
-        
-        const response = await fetch('/export_action_log_excel', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(exportData)
-        });
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `action_log_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        window.CCTV.UI.showMessage(`✅ Экспортировано ${exportData.length} записей`, 'success');
+        try {
+            const response = await fetch('/export_action_log_excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(exportData)
+            });
+            if (!response.ok) {
+                let errorText = await response.text();
+                window.CCTV.UI.showMessage(`Ошибка экспорта (${response.status})`, 'error');
+                return;
+            }
+            const blob = await response.blob();
+            if (!blob.type.includes('spreadsheetml.sheet')) {
+                window.CCTV.UI.showMessage('Сервер вернул некорректный файл', 'error');
+                return;
+            }
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `action_log_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            window.CCTV.UI.showMessage(`✅ Экспортировано ${exportData.length} записей`, 'success');
+        } catch (error) {
+            console.error('Export error:', error);
+            window.CCTV.UI.showMessage('Ошибка при экспорте', 'error');
+        }
     }
     
     showAddForm() {

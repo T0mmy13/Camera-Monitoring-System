@@ -234,7 +234,6 @@ tr:hover {
     background: #229954;
 }
 
-/* Кнопка сброса фильтров - цвет #f39c12 (тёплый оранжевый) */
 .reset-filters-btn {
     padding: 5px 12px;
     background: #f39c12;
@@ -607,7 +606,7 @@ tr:hover {
 .table-container {
     overflow-x: auto;
 }
-/* Маленькая круглая кнопка сброса фильтров в панели фильтров */
+
 .reset-filters-icon {
     width: 28px;
     height: 28px;
@@ -635,7 +634,6 @@ tr:hover {
     transform: rotate(30deg);
 }
 
-/* Контейнер фильтров — делаем flex с выравниванием */
 #filter-buttons-container {
     background: white;
     padding: 12px 15px;
@@ -648,14 +646,14 @@ tr:hover {
     gap: 8px;
 }
 
-/* Убираем старую кнопку сброса из меню таблиц */
 .table-selector .reset-filters-btn {
     display: none;
 }
-/* Скрываем пустой контейнер сообщений */
+
 #message:empty {
     display: none;
-}/* Счётчик записей под таблицей */
+}
+
 .table-counter {
     padding: 10px 15px;
     background: #f8f9fa;

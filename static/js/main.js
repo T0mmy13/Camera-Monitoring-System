@@ -7,10 +7,13 @@ document.addEventListener('DOMContentLoaded', function() {
     window.CCTV.AppState.loadState();
     
     const availableTables = window.CCTV.Constants.ROLE_TABLE_ACCESS[window.CCTV.AppState.userRole] || [];
-    if (!availableTables.includes(window.CCTV.AppState.currentTable) && availableTables.length > 0) {
-        window.CCTV.AppState.currentTable = availableTables[0];
-    } else if (!availableTables.includes(window.CCTV.AppState.currentTable) && window.CCTV.AppState.userRole === 'user') {
-        window.CCTV.AppState.currentTable = 'cam_camera_report';
+    // Если сохранённая таблица недоступна, выбираем отчёты (если доступны) или первую доступную
+    if (!availableTables.includes(window.CCTV.AppState.currentTable)) {
+        if (availableTables.includes('cam_camera_report')) {
+            window.CCTV.AppState.currentTable = 'cam_camera_report';
+        } else if (availableTables.length > 0) {
+            window.CCTV.AppState.currentTable = availableTables[0];
+        }
     }
     
     loadTable(window.CCTV.AppState.currentTable);
@@ -133,12 +136,9 @@ function showContextMenu(x, y, tableInstance, recordId) {
     
     const canEdit = window.CCTV.UI.canEditCurrentTable();
     const currentTable = window.CCTV.AppState.currentTable;
-    const isReportTable = currentTable === 'cam_camera_report';
-    const isActionLog = currentTable === 'cam_action_log';
     
     let menuHtml = '';
     
-    // Экспорт в Excel ТОЛЬКО для отчётов и журнала действий
     if (currentTable === 'cam_camera_report') {
         menuHtml += `<div class="context-menu-item" onclick="window.CCTV.CameraReportTable.exportToExcel()">📎 Экспорт в Excel</div>`;
     } else if (currentTable === 'cam_action_log') {
@@ -264,7 +264,6 @@ window.resetAllFilters = function() {
                 window.CCTV.loadTable('cam_camera_report');
             }
             break;
-            
         case 'cam_registrators':
             window.CCTV.AppState.currentApFilter = null;
             if (window.CCTV.RegistratorsTable) {
@@ -273,7 +272,6 @@ window.resetAllFilters = function() {
                 window.CCTV.loadTable('cam_registrators');
             }
             break;
-            
         case 'cam_camers':
             window.CCTV.AppState.currentRegistratorFilters.clear();
             if (window.CCTV.CamerasTable) {
@@ -282,7 +280,6 @@ window.resetAllFilters = function() {
                 window.CCTV.loadTable('cam_camers');
             }
             break;
-            
         case 'cam_action_log':
             const todayLog = window.CCTV.UI.getTodayDate();
             window.CCTV.AppState.actionLogFilters = {
@@ -298,7 +295,6 @@ window.resetAllFilters = function() {
                 window.CCTV.loadTable('cam_action_log');
             }
             break;
-            
         case 'cam_users':
             break;
     }
