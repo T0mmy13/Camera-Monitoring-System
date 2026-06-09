@@ -42,6 +42,12 @@ window.loadTable = async function(tableName) {
     
     updateActiveButton(tableName);
     
+    // Скрываем аналитику и показываем таблицу
+    if (window.CCTV.AnalyticsView) window.CCTV.AnalyticsView.hide();
+    document.querySelector('.table-container').style.display = 'block';
+    const filterContainer = document.getElementById('filter-buttons-container');
+    if (filterContainer) filterContainer.style.display = 'flex';
+    
     const tableInstance = getTableInstance(tableName);
     if (!tableInstance) {
         console.error('Table instance not found:', tableName);
@@ -74,7 +80,7 @@ function getTableInstance(tableName) {
 }
 
 function updateActiveButton(tableName) {
-    const buttons = document.querySelectorAll('#table-selector button');
+    const buttons = document.querySelectorAll('#table-selector button:not(#analytics-btn)');
     const buttonText = window.CCTV.UI.getButtonText(tableName);
     buttons.forEach(btn => {
         if (btn.textContent === buttonText || btn.textContent.includes(buttonText)) {
@@ -83,6 +89,9 @@ function updateActiveButton(tableName) {
             btn.classList.remove('active');
         }
     });
+    // Сбросить активность у кнопки аналитики
+    const analyticsBtn = document.getElementById('analytics-btn');
+    if (analyticsBtn) analyticsBtn.classList.remove('active');
 }
 
 function setupContextMenu(tableInstance) {
@@ -345,8 +354,21 @@ function buildTableButtons() {
     availableTables.forEach(table => {
         buttonsHtml += `<button onclick="window.loadTable('${table}')">${tableNames[table]}</button>`;
     });
-    
+    // Кнопка аналитики без эмодзи, синяя
+    buttonsHtml += `<button id="analytics-btn" style="background: #3498db;">Аналитика</button>`;
     container.innerHTML = buttonsHtml;
+    
+    const analyticsBtn = document.getElementById('analytics-btn');
+    if (analyticsBtn) {
+        analyticsBtn.addEventListener('click', () => {
+            document.querySelectorAll('#table-selector button').forEach(btn => btn.classList.remove('active'));
+            analyticsBtn.classList.add('active');
+            document.querySelector('.table-container').style.display = 'none';
+            const filterContainer = document.getElementById('filter-buttons-container');
+            if (filterContainer) filterContainer.style.display = 'none';
+            window.CCTV.AnalyticsView.show();
+        });
+    }
 }
 
 document.addEventListener('DOMContentLoaded', function() {

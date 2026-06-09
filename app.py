@@ -13,7 +13,7 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
-from collections import defaultdict
+from collections import defaultdict, Counter
 from time import time
 
 load_dotenv()
@@ -439,11 +439,9 @@ def update_record(table_name, id):
         if 'id' in data:
             del data['id']
         
-        # Извлекаем версию, присланную клиентом
         client_version = data.pop('version', None)
         current_version = old_record.get('version', 0)
         
-        # Проверка оптимистической блокировки
         if client_version is not None and client_version != current_version:
             cur.close()
             conn.close()
@@ -452,7 +450,6 @@ def update_record(table_name, id):
                 'error': 'Запись была изменена другим пользователем. Обновите страницу и повторите попытку.'
             }), 409
         
-        # Ограничение для редактора: может менять только comment в cam_camera_report
         role = session.get('role')
         if role == 'editor' and table_name == 'cam_camera_report':
             allowed_fields = {'comment'}
@@ -481,7 +478,6 @@ def update_record(table_name, id):
             conn.close()
             return jsonify({'error': 'No data to update'}), 400
         
-        # Формируем UPDATE – версия обновится автоматически через триггер
         set_clause = ','.join([f"{key}=%s" for key in data.keys()])
         values = list(data.values()) + [id]
         cur.execute(f"UPDATE public.{table_name} SET {set_clause} WHERE id = %s", values)
@@ -646,6 +642,539 @@ def export_action_log_excel():
         as_attachment=True,
         download_name=f'action_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
     )
+
+# ========== АНАЛИТИКА (ОКОНЧАТЕЛЬНАЯ ВЕРСИЯ) ==========
+@app.route('/api/analytics', methods=['GET'])
+@login_required
+@rate_limit(max_requests=50)
+def get_analytics():
+    date_from_str = request.args.get('date_from')
+    date_to_str = request.args.get('date_to')
+    ap_ids = request.args.getlist('ap_ids')
+    registrator_ids = request.args.getlist('registrator_ids')
+    
+    if not date_from_str or not date_to_str:
+        return jsonify({'error': 'date_from and date_to required'}), 400
+    
+    try:
+        date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+        date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': 'Invalid date format'}), 400
+    
+    if date_from > date_to:
+        return jsonify({'error': 'date_from must be <= date_to'}), 400
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Определяем тип фильтра
+    use_ap_filter = False
+    use_reg_filter = False
+    filter_values = []
+    if registrator_ids:
+        use_reg_filter = True
+        filter_values = [int(x) for x in registrator_ids]
+    elif ap_ids:
+        use_ap_filter = True
+        filter_values = [int(x) for x in ap_ids]
+    
+    # --- KPI ---
+    if use_reg_filter:
+        cur.execute("""
+            SELECT COUNT(DISTINCT c.id) as total_cameras,
+                   COUNT(DISTINCT r.id) as total_registrators,
+                   COUNT(DISTINCT r.ap) as total_aps
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+            WHERE r.id = ANY(%s::int[])
+        """, (filter_values,))
+    elif use_ap_filter:
+        cur.execute("""
+            SELECT COUNT(DISTINCT c.id) as total_cameras,
+                   COUNT(DISTINCT r.id) as total_registrators,
+                   COUNT(DISTINCT r.ap) as total_aps
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+            WHERE r.ap = ANY(%s::int[])
+        """, (filter_values,))
+    else:
+        cur.execute("""
+            SELECT COUNT(DISTINCT c.id) as total_cameras,
+                   COUNT(DISTINCT r.id) as total_registrators,
+                   COUNT(DISTINCT r.ap) as total_aps
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+        """)
+    kpi_row = cur.fetchone()
+    total_cameras = kpi_row['total_cameras'] or 0
+    total_registrators = kpi_row['total_registrators'] or 0
+    total_aps = kpi_row['total_aps'] or 0
+    
+    # % отчётов за последние 7 дней
+    week_ago = date_to - timedelta(days=7)
+    if use_reg_filter:
+        cur.execute("""
+            SELECT COUNT(DISTINCT c.id) as cnt
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+            WHERE EXISTS (
+                SELECT 1 FROM cam_camera_report rep
+                WHERE rep.id_cam = c.id AND rep.recording_date BETWEEN %s AND %s
+            )
+            AND r.id = ANY(%s::int[])
+        """, (week_ago, date_to, filter_values))
+    elif use_ap_filter:
+        cur.execute("""
+            SELECT COUNT(DISTINCT c.id) as cnt
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+            WHERE EXISTS (
+                SELECT 1 FROM cam_camera_report rep
+                WHERE rep.id_cam = c.id AND rep.recording_date BETWEEN %s AND %s
+            )
+            AND r.ap = ANY(%s::int[])
+        """, (week_ago, date_to, filter_values))
+    else:
+        cur.execute("""
+            SELECT COUNT(DISTINCT c.id) as cnt
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+            WHERE EXISTS (
+                SELECT 1 FROM cam_camera_report rep
+                WHERE rep.id_cam = c.id AND rep.recording_date BETWEEN %s AND %s
+            )
+        """, (week_ago, date_to))
+    recent_count = cur.fetchone()['cnt'] or 0
+    report_coverage_7d = round(recent_count / total_cameras * 100, 1) if total_cameras > 0 else 0
+    
+    # % исправных на date_to
+    if use_reg_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, rep.condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.id = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN condition = 'Исправна' THEN 1 ELSE 0 END) as healthy
+            FROM last_reports
+        """, (date_to, filter_values))
+    elif use_ap_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, rep.condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.ap = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN condition = 'Исправна' THEN 1 ELSE 0 END) as healthy
+            FROM last_reports
+        """, (date_to, filter_values))
+    else:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, rep.condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN condition = 'Исправна' THEN 1 ELSE 0 END) as healthy
+            FROM last_reports
+        """, (date_to,))
+    status_row = cur.fetchone()
+    healthy_count = status_row['healthy'] or 0
+    healthy_percent = round(healthy_count / total_cameras * 100, 1) if total_cameras > 0 else 0
+    
+    kpi = {
+        'total_cameras': total_cameras,
+        'total_registrators': total_registrators,
+        'total_aps': total_aps,
+        'report_coverage_7d': report_coverage_7d,
+        'healthy_percent': healthy_percent
+    }
+    
+    # --- Распределение состояний на date_to ---
+    if use_reg_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, COALESCE(rep.condition, 'Нет данных') as condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.id = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT condition, COUNT(*) as count
+            FROM last_reports
+            GROUP BY condition
+        """, (date_to, filter_values))
+    elif use_ap_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, COALESCE(rep.condition, 'Нет данных') as condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.ap = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT condition, COUNT(*) as count
+            FROM last_reports
+            GROUP BY condition
+        """, (date_to, filter_values))
+    else:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, COALESCE(rep.condition, 'Нет данных') as condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT condition, COUNT(*) as count
+            FROM last_reports
+            GROUP BY condition
+        """, (date_to,))
+    status_distribution = {row['condition']: row['count'] for row in cur.fetchall()}
+    
+    # --- Динамика состояний по дням ---
+    if use_reg_filter:
+        cur.execute("""
+            SELECT DISTINCT c.id as cam_id
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+            WHERE r.id = ANY(%s::int[])
+        """, (filter_values,))
+    elif use_ap_filter:
+        cur.execute("""
+            SELECT DISTINCT c.id as cam_id
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+            WHERE r.ap = ANY(%s::int[])
+        """, (filter_values,))
+    else:
+        cur.execute("""
+            SELECT DISTINCT c.id as cam_id
+            FROM cam_camers c
+            JOIN cam_registrators r ON c.idreg = r.id
+        """)
+    camera_ids = [row['cam_id'] for row in cur.fetchall()]
+    
+    if not camera_ids:
+        cur.close()
+        conn.close()
+        return jsonify({
+            'kpi': kpi,
+            'status_distribution': status_distribution,
+            'daily_status': [],
+            'top_breakdowns': [],
+            'problem_registrators': [],
+            'longest_breakdowns': []
+        })
+    
+    cur.execute("""
+        SELECT id_cam as cam_id, recording_date, condition
+        FROM cam_camera_report
+        WHERE id_cam = ANY(%s) AND recording_date <= %s
+        ORDER BY id_cam, recording_date
+    """, [camera_ids, date_to])
+    all_reports = cur.fetchall()
+    
+    reports_by_cam = {}
+    for rep in all_reports:
+        cam_id = rep['cam_id']
+        if cam_id not in reports_by_cam:
+            reports_by_cam[cam_id] = []
+        reports_by_cam[cam_id].append(rep)
+    
+    date_list = []
+    current = date_from
+    while current <= date_to:
+        date_list.append(current.isoformat())
+        current += timedelta(days=1)
+    
+    all_conditions = ['Исправна', 'Частично не исправна', 'Неисправна', 'Отключена', 'Проба']
+    daily_counts = {date: {cond: 0 for cond in all_conditions} for date in date_list}
+    
+    for cam_id, reports in reports_by_cam.items():
+        reports.sort(key=lambda x: x['recording_date'])
+        last_cond = 'Нет данных'
+        rep_idx = 0
+        for date_str in date_list:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            while rep_idx < len(reports) and reports[rep_idx]['recording_date'] <= date_obj:
+                last_cond = reports[rep_idx]['condition']
+                rep_idx += 1
+            if last_cond != 'Нет данных':
+                daily_counts[date_str][last_cond] += 1
+    
+    daily_status = []
+    for date in date_list:
+        entry = {'date': date}
+        for cond in all_conditions:
+            entry[cond] = daily_counts[date][cond]
+        daily_status.append(entry)
+    
+    # --- Топ поломок ---
+    if use_reg_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, rep.breakdown, rep.condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.id = ANY(%s::int[])
+                  AND rep.condition IN ('Частично не исправна', 'Неисправна')
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT breakdown
+            FROM last_reports
+            WHERE breakdown IS NOT NULL AND breakdown != ''
+        """, (date_to, filter_values))
+    elif use_ap_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, rep.breakdown, rep.condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.ap = ANY(%s::int[])
+                  AND rep.condition IN ('Частично не исправна', 'Неисправна')
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT breakdown
+            FROM last_reports
+            WHERE breakdown IS NOT NULL AND breakdown != ''
+        """, (date_to, filter_values))
+    else:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, rep.breakdown, rep.condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE rep.condition IN ('Частично не исправна', 'Неисправна')
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT breakdown
+            FROM last_reports
+            WHERE breakdown IS NOT NULL AND breakdown != ''
+        """, (date_to,))
+    breakdowns = []
+    for row in cur.fetchall():
+        parts = row['breakdown'].split(',')
+        for part in parts:
+            part = part.strip()
+            if part:
+                breakdowns.append(part)
+    breakdown_counter = Counter(breakdowns)
+    top_breakdowns = [{'breakdown': k, 'count': v} for k, v in breakdown_counter.most_common(10)]
+    
+    # --- Проблемные регистраторы ---
+    if use_reg_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, c.idreg as reg_id, COALESCE(rep.condition, 'Нет данных') as condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.id = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT r.id as reg_id,
+                   CONCAT('АП', r.ap, '_', r.id_reg_on_ap) as reg_name,
+                   COUNT(lr.cam_id) as total_cameras,
+                   SUM(CASE WHEN lr.condition IN ('Частично не исправна', 'Неисправна') THEN 1 ELSE 0 END) as unhealthy
+            FROM cam_registrators r
+            LEFT JOIN last_reports lr ON lr.reg_id = r.id
+            GROUP BY r.id, r.ap, r.id_reg_on_ap
+            ORDER BY unhealthy DESC
+        """, (date_to, filter_values))
+    elif use_ap_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, c.idreg as reg_id, COALESCE(rep.condition, 'Нет данных') as condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.ap = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT r.id as reg_id,
+                   CONCAT('АП', r.ap, '_', r.id_reg_on_ap) as reg_name,
+                   COUNT(lr.cam_id) as total_cameras,
+                   SUM(CASE WHEN lr.condition IN ('Частично не исправна', 'Неисправна') THEN 1 ELSE 0 END) as unhealthy
+            FROM cam_registrators r
+            LEFT JOIN last_reports lr ON lr.reg_id = r.id
+            GROUP BY r.id, r.ap, r.id_reg_on_ap
+            ORDER BY unhealthy DESC
+        """, (date_to, filter_values))
+    else:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, c.idreg as reg_id, COALESCE(rep.condition, 'Нет данных') as condition
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                ORDER BY c.id, rep.recording_date DESC
+            )
+            SELECT r.id as reg_id,
+                   CONCAT('АП', r.ap, '_', r.id_reg_on_ap) as reg_name,
+                   COUNT(lr.cam_id) as total_cameras,
+                   SUM(CASE WHEN lr.condition IN ('Частично не исправна', 'Неисправна') THEN 1 ELSE 0 END) as unhealthy
+            FROM cam_registrators r
+            LEFT JOIN last_reports lr ON lr.reg_id = r.id
+            GROUP BY r.id, r.ap, r.id_reg_on_ap
+            ORDER BY unhealthy DESC
+        """, (date_to,))
+    problem_registrators = []
+    for row in cur.fetchall():
+        total = row['total_cameras'] or 0
+        unhealthy = row['unhealthy'] or 0
+        percent = round(unhealthy / total * 100, 1) if total > 0 else 0
+        problem_registrators.append({
+            'registrator_name': row['reg_name'],
+            'total_cameras': total,
+            'unhealthy': unhealthy,
+            'unhealthy_percent': percent
+        })
+    
+    # --- Камеры с самой длительной непрерывной поломкой ---
+    if use_reg_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, c.idreg, c.port, c.location,
+                       rep.condition, rep.breakdown, rep.recording_date as last_report_date
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.id = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            ),
+            first_broken AS (
+                SELECT lr.cam_id, MIN(rep.recording_date) as start_date
+                FROM cam_camera_report rep
+                JOIN last_reports lr ON lr.cam_id = rep.id_cam
+                WHERE rep.condition IN ('Частично не исправна', 'Неисправна')
+                  AND rep.recording_date <= %s
+                GROUP BY lr.cam_id
+            )
+            SELECT lr.cam_id, lr.idreg, lr.port, lr.location, lr.condition, lr.breakdown,
+                   fb.start_date, (%s - fb.start_date) as days,
+                   CONCAT('АП', r.ap, '_', r.id_reg_on_ap) as reg_name
+            FROM last_reports lr
+            JOIN first_broken fb ON lr.cam_id = fb.cam_id
+            JOIN cam_registrators r ON lr.idreg = r.id
+            WHERE lr.condition IN ('Частично не исправна', 'Неисправна')
+              AND NOT EXISTS (
+                  SELECT 1 FROM cam_camera_report rep2
+                  WHERE rep2.id_cam = lr.cam_id
+                    AND rep2.recording_date > fb.start_date AND rep2.recording_date <= %s
+                    AND rep2.condition = 'Исправна'
+              )
+            ORDER BY days DESC
+            LIMIT 10
+        """, (date_to, filter_values, date_to, date_to, date_to))
+    elif use_ap_filter:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, c.idreg, c.port, c.location,
+                       rep.condition, rep.breakdown, rep.recording_date as last_report_date
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                WHERE r.ap = ANY(%s::int[])
+                ORDER BY c.id, rep.recording_date DESC
+            ),
+            first_broken AS (
+                SELECT lr.cam_id, MIN(rep.recording_date) as start_date
+                FROM cam_camera_report rep
+                JOIN last_reports lr ON lr.cam_id = rep.id_cam
+                WHERE rep.condition IN ('Частично не исправна', 'Неисправна')
+                  AND rep.recording_date <= %s
+                GROUP BY lr.cam_id
+            )
+            SELECT lr.cam_id, lr.idreg, lr.port, lr.location, lr.condition, lr.breakdown,
+                   fb.start_date, (%s - fb.start_date) as days,
+                   CONCAT('АП', r.ap, '_', r.id_reg_on_ap) as reg_name
+            FROM last_reports lr
+            JOIN first_broken fb ON lr.cam_id = fb.cam_id
+            JOIN cam_registrators r ON lr.idreg = r.id
+            WHERE lr.condition IN ('Частично не исправна', 'Неисправна')
+              AND NOT EXISTS (
+                  SELECT 1 FROM cam_camera_report rep2
+                  WHERE rep2.id_cam = lr.cam_id
+                    AND rep2.recording_date > fb.start_date AND rep2.recording_date <= %s
+                    AND rep2.condition = 'Исправна'
+              )
+            ORDER BY days DESC
+            LIMIT 10
+        """, (date_to, filter_values, date_to, date_to, date_to))
+    else:
+        cur.execute("""
+            WITH last_reports AS (
+                SELECT DISTINCT ON (c.id) c.id as cam_id, c.idreg, c.port, c.location,
+                       rep.condition, rep.breakdown, rep.recording_date as last_report_date
+                FROM cam_camers c
+                JOIN cam_registrators r ON c.idreg = r.id
+                LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
+                ORDER BY c.id, rep.recording_date DESC
+            ),
+            first_broken AS (
+                SELECT lr.cam_id, MIN(rep.recording_date) as start_date
+                FROM cam_camera_report rep
+                JOIN last_reports lr ON lr.cam_id = rep.id_cam
+                WHERE rep.condition IN ('Частично не исправна', 'Неисправна')
+                  AND rep.recording_date <= %s
+                GROUP BY lr.cam_id
+            )
+            SELECT lr.cam_id, lr.idreg, lr.port, lr.location, lr.condition, lr.breakdown,
+                   fb.start_date, (%s - fb.start_date) as days,
+                   CONCAT('АП', r.ap, '_', r.id_reg_on_ap) as reg_name
+            FROM last_reports lr
+            JOIN first_broken fb ON lr.cam_id = fb.cam_id
+            JOIN cam_registrators r ON lr.idreg = r.id
+            WHERE lr.condition IN ('Частично не исправна', 'Неисправна')
+              AND NOT EXISTS (
+                  SELECT 1 FROM cam_camera_report rep2
+                  WHERE rep2.id_cam = lr.cam_id
+                    AND rep2.recording_date > fb.start_date AND rep2.recording_date <= %s
+                    AND rep2.condition = 'Исправна'
+              )
+            ORDER BY days DESC
+            LIMIT 10
+        """, (date_to, date_to, date_to, date_to))
+    longest_breakdowns = []
+    for row in cur.fetchall():
+        longest_breakdowns.append({
+            'camera_name': f"{row['reg_name']}_{row['port']}",
+            'location': row['location'] or '',
+            'condition': row['condition'],
+            'breakdown': row['breakdown'] or '',
+            'days': row['days'],
+            'start_date': row['start_date'].isoformat()
+        })
+    
+    cur.close()
+    conn.close()
+    
+    return jsonify({
+        'kpi': kpi,
+        'status_distribution': status_distribution,
+        'daily_status': daily_status,
+        'top_breakdowns': top_breakdowns,
+        'problem_registrators': problem_registrators,
+        'longest_breakdowns': longest_breakdowns
+    })
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=8080)
