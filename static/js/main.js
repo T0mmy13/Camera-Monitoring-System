@@ -7,7 +7,6 @@ document.addEventListener('DOMContentLoaded', function() {
     window.CCTV.AppState.loadState();
     
     const availableTables = window.CCTV.Constants.ROLE_TABLE_ACCESS[window.CCTV.AppState.userRole] || [];
-    // Если сохранённая таблица недоступна, выбираем отчёты (если доступны) или первую доступную
     if (!availableTables.includes(window.CCTV.AppState.currentTable)) {
         if (availableTables.includes('cam_camera_report')) {
             window.CCTV.AppState.currentTable = 'cam_camera_report';
@@ -26,7 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
 document.addEventListener('visibilitychange', function() {
     if (!document.hidden && window.CCTV.AppState.currentTable) {
         loadTable(window.CCTV.AppState.currentTable);
-        window.CCTV.UI.showMessage('🔄 Данные обновлены', 'success');
+        window.CCTV.UI.showMessage('Данные обновлены', 'success');
     }
 });
 
@@ -42,7 +41,6 @@ window.loadTable = async function(tableName) {
     
     updateActiveButton(tableName);
     
-    // Скрываем аналитику и показываем таблицу
     if (window.CCTV.AnalyticsView) window.CCTV.AnalyticsView.hide();
     document.querySelector('.table-container').style.display = 'block';
     const filterContainer = document.getElementById('filter-buttons-container');
@@ -89,7 +87,6 @@ function updateActiveButton(tableName) {
             btn.classList.remove('active');
         }
     });
-    // Сбросить активность у кнопки аналитики
     const analyticsBtn = document.getElementById('analytics-btn');
     if (analyticsBtn) analyticsBtn.classList.remove('active');
 }
@@ -149,9 +146,9 @@ function showContextMenu(x, y, tableInstance, recordId) {
     let menuHtml = '';
     
     if (currentTable === 'cam_camera_report') {
-        menuHtml += `<div class="context-menu-item" onclick="window.CCTV.CameraReportTable.exportToExcel()">📎 Экспорт в Excel</div>`;
+        menuHtml += `<div class="context-menu-item" onclick="window.CCTV.CameraReportTable.exportToExcel()">Экспорт в Excel</div>`;
     } else if (currentTable === 'cam_action_log') {
-        menuHtml += `<div class="context-menu-item" onclick="window.CCTV.ActionLogTable.exportToExcel()">📎 Экспорт в Excel</div>`;
+        menuHtml += `<div class="context-menu-item" onclick="window.CCTV.ActionLogTable.exportToExcel()">Экспорт в Excel</div>`;
     }
     
     if (menuHtml && canEdit) {
@@ -161,13 +158,13 @@ function showContextMenu(x, y, tableInstance, recordId) {
     if (canEdit) {
         if (recordId) {
             menuHtml += `
-                <div class="context-menu-item" onclick="showAddForm()">➕ Добавить запись</div>
+                <div class="context-menu-item" onclick="showAddForm()">Добавить запись</div>
                 <div class="context-menu-divider"></div>
-                <div class="context-menu-item" onclick="showEditForm(${recordId})">✏️ Редактировать</div>
-                <div class="context-menu-item delete" onclick="deleteRecordFromMenu(${recordId})">🗑️ Удалить</div>
+                <div class="context-menu-item" onclick="showEditForm(${recordId})">Редактировать</div>
+                <div class="context-menu-item delete" onclick="deleteRecordFromMenu(${recordId})">Удалить</div>
             `;
         } else {
-            menuHtml += `<div class="context-menu-item" onclick="showAddForm()">➕ Добавить запись</div>`;
+            menuHtml += `<div class="context-menu-item" onclick="showAddForm()">Добавить запись</div>`;
         }
     }
     
@@ -354,7 +351,6 @@ function buildTableButtons() {
     availableTables.forEach(table => {
         buttonsHtml += `<button onclick="window.loadTable('${table}')">${tableNames[table]}</button>`;
     });
-    // Кнопка аналитики без эмодзи, синяя
     buttonsHtml += `<button id="analytics-btn" style="background: #3498db;">Аналитика</button>`;
     container.innerHTML = buttonsHtml;
     

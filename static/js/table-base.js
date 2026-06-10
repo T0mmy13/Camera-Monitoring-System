@@ -185,7 +185,7 @@ class BaseTable {
         let columnsToDisplay = window.CCTV.Constants.COLUMN_ORDER[this.tableName] || 
             Object.keys(sortedData[0] || {}).filter(col => !window.CCTV.Constants.HIDDEN_COLUMNS.includes(col));
         let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
-            📊 Найдено записей: ${sortedData.length}
+            Найдено записей: ${sortedData.length}
         </div>`;
         html += '<table id="data-table"><thead><tr>';
         columnsToDisplay.forEach(col => {
@@ -205,7 +205,7 @@ class BaseTable {
                 </th>`;
             }
         });
-        html += '</tr></thead><tbody>';
+        html += '</table></thead><tbody>';
         for (const row of sortedData) {
             html += '<tr data-id="' + row.id + '">';
             for (const col of columnsToDisplay) {
@@ -223,7 +223,7 @@ class BaseTable {
         const originalCount = this.originalData.length;
         const totalCount = sortedData.length;
         let countHtml = `<div style="padding: 10px 15px; background: #f8f9fa; border-top: 1px solid #ddd; border-radius: 0 0 8px 8px; font-size: 13px; color: #555;">
-            📊 Показано записей: ${totalCount} из ${originalCount}
+            Показано записей: ${totalCount} из ${originalCount}
         </div>`;
         html += countHtml;
         document.getElementById('table-content').innerHTML = html;

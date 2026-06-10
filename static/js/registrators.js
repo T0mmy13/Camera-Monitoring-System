@@ -36,51 +36,48 @@ class RegistratorsTable extends window.CCTV.BaseTable {
         workingData = this.applyApFilter(workingData);
         let filteredData = this.applyFilters(workingData);
         let sortedData = this.applySorting(filteredData);
+        const container = document.getElementById('table-content');
+        if (!container) return;
+        
         if (sortedData.length === 0) {
-            document.getElementById('table-content').innerHTML = '<p style="padding: 20px; text-align: center;">Нет данных</p>';
+            container.innerHTML = '<p style="padding: 20px; text-align: center;">Нет данных</p>';
             return;
         }
-        const columnsToDisplay = window.CCTV.Constants.COLUMN_ORDER['cam_registrators'];
+        
+        // Явно задаём колонки для отображения
+        const columnsToDisplay = ['registrator_full', 'ip', 'type', 'count_ports', 'extensions', 'comment', 'condition'];
+        
         let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
-            📊 Найдено записей: ${sortedData.length}
+            Найдено записей: ${sortedData.length}
         </div>`;
-        html += '<table id="data-table"><thead><tr>';
-        columnsToDisplay.forEach(col => {
-            const displayName = window.CCTV.Constants.COLUMN_NAMES[col] || col;
-            const canFilter = !window.CCTV.Constants.NO_FILTER_COLUMNS[this.tableName]?.includes(col);
-            if (canFilter) {
-                html += `<th style="position: relative;">
-                    <button class="column-btn" onclick="window.CCTV.showColumnMenu(event, '${col}')" style="cursor: pointer;">
-                        ${window.CCTV.UI.escapeHtml(displayName)}
-                    </button>
-                </th>`;
-            } else {
-                html += `<th style="position: relative;">
-                    <div class="column-btn" style="cursor: default; opacity: 0.7;">
-                        ${window.CCTV.UI.escapeHtml(displayName)}
-                    </div>
-                </th>`;
-            }
-        });
+        html += '<table id="data-table" style="width:100%; border-collapse:collapse;">';
+        html += '<thead><tr>';
+        for (let col of columnsToDisplay) {
+            let displayName = window.CCTV.Constants.COLUMN_NAMES[col] || col;
+            html += `<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd; background: #34495e; color: white;">${window.CCTV.UI.escapeHtml(displayName)}</th>`;
+        }
         html += '</tr></thead><tbody>';
-        for (const row of sortedData) {
+        
+        for (let row of sortedData) {
             html += '<tr data-id="' + row.id + '">';
-            for (const col of columnsToDisplay) {
+            for (let col of columnsToDisplay) {
                 let value = row[col];
-                if (value === null) value = '';
-                html += `<td>${window.CCTV.UI.escapeHtml(value)}</td>`;
+                if (value === null || value === undefined) value = '';
+                html += `<td style="padding: 12px; border-bottom: 1px solid #ddd;">${window.CCTV.UI.escapeHtml(String(value))}</td>`;
             }
             html += '</tr>';
         }
         html += '</tbody></table>';
-        document.getElementById('table-content').innerHTML = html;
+        container.innerHTML = html;
     }
     
     buildFiltersUI() {
         const container = document.getElementById('filter-buttons-container');
         if (!container) return;
+        
+        // Принудительно задаём стили для горизонтального расположения
+        container.style.cssText = '';
         container.style.display = 'flex';
-        container.style.flexWrap = 'wrap';
         container.style.alignItems = 'center';
         container.style.gap = '8px';
         container.style.background = 'white';
@@ -88,14 +85,18 @@ class RegistratorsTable extends window.CCTV.BaseTable {
         container.style.borderRadius = '8px';
         container.style.marginBottom = '20px';
         container.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+        container.style.overflowX = 'auto';
+        container.style.whiteSpace = 'nowrap';
+        container.style.flexWrap = 'nowrap';
+        
         const uniqueAPs = this.getUniqueAPs();
-        let buttonsHtml = '<span class="filter-buttons-title">Фильтр по АП:</span>';
+        let buttonsHtml = '<span class="filter-buttons-title" style="flex-shrink: 0;">Фильтр по АП:</span>';
         buttonsHtml += `<button class="filter-btn ${this.currentApFilter === null ? 'all-active' : ''}" onclick="window.CCTV.RegistratorsTable.filterByAP(null)">Все АП</button>`;
         uniqueAPs.forEach(ap => {
             const isActive = this.currentApFilter === ap;
             buttonsHtml += `<button class="filter-btn ${isActive ? 'active' : ''}" onclick="window.CCTV.RegistratorsTable.filterByAP(${ap})">АП${ap}</button>`;
         });
-        buttonsHtml += `<button class="reset-filters-icon" onclick="window.resetAllFilters()" title="Сбросить все фильтры">↻</button>`;
+        buttonsHtml += `<button class="reset-filters-icon" onclick="window.resetAllFilters()" title="Сбросить все фильтры" style="flex-shrink: 0;">↻</button>`;
         container.innerHTML = buttonsHtml;
     }
     
@@ -179,7 +180,6 @@ class RegistratorsTable extends window.CCTV.BaseTable {
         formData.forEach((value, key) => { data[key] = value; });
         delete data.id;
         
-        // Валидация IP
         const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$|^localhost$|^127\.0\.0\.1$/;
         if (data.ip && !ipPattern.test(data.ip)) {
             window.CCTV.UI.showMessage('Неверный формат IP-адреса', 'error');
@@ -284,7 +284,6 @@ class RegistratorsTable extends window.CCTV.BaseTable {
             });
             submitData.version = this.currentEditVersion;
             
-            // Валидация IP
             const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$|^localhost$|^127\.0\.0\.1$/;
             if (submitData.ip && !ipPattern.test(submitData.ip)) {
                 window.CCTV.UI.showMessage('Неверный формат IP-адреса', 'error');
@@ -297,7 +296,7 @@ class RegistratorsTable extends window.CCTV.BaseTable {
                 window.CCTV.loadTable(this.tableName);
                 window.CCTV.UI.showMessage('Запись успешно обновлена', 'success');
             } else if (result.status === 409 || (result.error && result.error.includes('конфликт'))) {
-                window.CCTV.UI.showMessage('⚠️ Запись была изменена другим пользователем. Обновите страницу.', 'error');
+                window.CCTV.UI.showMessage('Запись была изменена другим пользователем. Обновите страницу.', 'error');
                 window.CCTV.loadTable(this.tableName);
                 window.CCTV.UI.closeModal();
             } else {

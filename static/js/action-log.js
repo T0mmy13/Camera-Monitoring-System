@@ -99,84 +99,110 @@ class ActionLogTable extends window.CCTV.BaseTable {
             }
             html += '</tr>';
         }
-        html += '</tbody></table>';
+        html += '</tbody></tr>';
         document.getElementById('table-content').innerHTML = html;
     }
     
     buildFiltersUI() {
         const container = document.getElementById('filter-buttons-container');
         if (!container) return;
-        const today = window.CCTV.UI.getTodayDate();
-        if (!this.actionLogFilters.startDate) this.actionLogFilters.startDate = today;
-        if (!this.actionLogFilters.endDate) this.actionLogFilters.endDate = today;
-        const users = [...new Set(this.originalData.map(row => row.user).filter(v => v))];
-        const actions = [...new Set(this.originalData.map(row => row.action).filter(v => v))];
-        const tables = [...new Set(this.originalData.map(row => row.table_name).filter(v => v))];
-        let html = `
-            <div class="filter-row" style="flex: 1;">
-                <div class="filter-item">
-                    <span class="filter-label">📅 Период</span>
-                    <input type="date" id="action-start-date" class="date-input-mini" value="${this.actionLogFilters.startDate}" max="${today}" onchange="window.CCTV.ActionLogTable.updateDateFilter()">
-                    <span>—</span>
-                    <input type="date" id="action-end-date" class="date-input-mini" value="${this.actionLogFilters.endDate}" max="${today}" onchange="window.CCTV.ActionLogTable.updateDateFilter()">
-                </div>
-                <div class="filter-item">
-                    <span class="filter-label">👤 Пользователь</span>
-                    <select id="action-user-filter" class="filter-select-mini" onchange="window.CCTV.ActionLogTable.updateFilters()">
-                        <option value="">Все</option>
-                        ${users.map(u => `<option value="${window.CCTV.UI.escapeHtml(u)}" ${this.actionLogFilters.userFilter === u ? 'selected' : ''}>${window.CCTV.UI.escapeHtml(u)}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="filter-item">
-                    <span class="filter-label">⚡ Действие</span>
-                    <select id="action-action-filter" class="filter-select-mini" onchange="window.CCTV.ActionLogTable.updateFilters()">
-                        <option value="">Все</option>
-                        ${actions.map(a => `<option value="${window.CCTV.UI.escapeHtml(a)}" ${this.actionLogFilters.actionFilter === a ? 'selected' : ''}>${window.CCTV.UI.escapeHtml(a)}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="filter-item">
-                    <span class="filter-label">📋 Таблица</span>
-                    <select id="action-table-filter" class="filter-select-mini" onchange="window.CCTV.ActionLogTable.updateFilters()">
-                        <option value="">Все</option>
-                        ${tables.map(t => `<option value="${window.CCTV.UI.escapeHtml(t)}" ${this.actionLogFilters.tableFilter === t ? 'selected' : ''}>${window.CCTV.UI.escapeHtml(t)}</option>`).join('')}
-                    </select>
-                </div>
-            </div>
-            <button class="reset-filters-icon" onclick="window.resetAllFilters()" title="Сбросить все фильтры">↻</button>
-        `;
-        container.innerHTML = html;
+        
+        // Полный сброс стилей, чтобы не наследовать высоту от других таблиц
+        container.style.cssText = '';
         container.style.display = 'flex';
         container.style.flexWrap = 'wrap';
         container.style.alignItems = 'center';
         container.style.justifyContent = 'space-between';
         container.style.background = 'white';
-        container.style.padding = '12px 15px';
+        container.style.padding = '8px 12px';
         container.style.borderRadius = '8px';
         container.style.marginBottom = '20px';
         container.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-    }
-    
-    updateDateFilter() {
-        const startDate = document.getElementById('action-start-date').value;
-        const endDate = document.getElementById('action-end-date').value;
-        if (startDate && endDate && startDate > endDate) return;
-        this.actionLogFilters.startDate = startDate;
-        this.actionLogFilters.endDate = endDate;
-        window.CCTV.AppState.actionLogFilters = this.actionLogFilters;
-        window.CCTV.loadTable(this.tableName);
-        window.CCTV.AppState.saveState();
-    }
-    
-    updateFilters() {
-        const userFilter = document.getElementById('action-user-filter').value;
-        const actionFilter = document.getElementById('action-action-filter').value;
-        const tableFilter = document.getElementById('action-table-filter').value;
-        this.actionLogFilters.userFilter = userFilter;
-        this.actionLogFilters.actionFilter = actionFilter;
-        this.actionLogFilters.tableFilter = tableFilter;
-        window.CCTV.AppState.actionLogFilters = this.actionLogFilters;
-        window.CCTV.loadTable(this.tableName);
-        window.CCTV.AppState.saveState();
+        container.style.gap = '8px';
+        
+        const today = window.CCTV.UI.getTodayDate();
+        if (!this.actionLogFilters.startDate) this.actionLogFilters.startDate = today;
+        if (!this.actionLogFilters.endDate) this.actionLogFilters.endDate = today;
+        
+        const users = [...new Set(this.originalData.map(row => row.user).filter(v => v))];
+        const actions = [...new Set(this.originalData.map(row => row.action).filter(v => v))];
+        const tables = [...new Set(this.originalData.map(row => row.table_name).filter(v => v))];
+        
+        let html = `
+            <div class="filter-row" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                <div class="filter-item" style="display: inline-flex; align-items: center; gap: 5px; background: #f8f9fa; padding: 4px 10px; border-radius: 20px;">
+                    <span class="filter-label">📅</span>
+                    <input type="date" id="action-start-date" class="date-input-mini" value="${this.actionLogFilters.startDate}" max="${today}" style="width: 110px; padding: 4px 6px;">
+                    <span>—</span>
+                    <input type="date" id="action-end-date" class="date-input-mini" value="${this.actionLogFilters.endDate}" max="${today}" style="width: 110px; padding: 4px 6px;">
+                </div>
+                <div class="filter-item" style="display: inline-flex; align-items: center; gap: 5px; background: #f8f9fa; padding: 4px 10px; border-radius: 20px;">
+                    <span class="filter-label">Пользователь</span>
+                    <select id="action-user-filter" class="filter-select-mini" style="width: auto; min-width: 100px; padding: 4px 6px;">
+                        <option value="">Все</option>
+                        ${users.map(u => `<option value="${window.CCTV.UI.escapeHtml(u)}" ${this.actionLogFilters.userFilter === u ? 'selected' : ''}>${window.CCTV.UI.escapeHtml(u)}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-item" style="display: inline-flex; align-items: center; gap: 5px; background: #f8f9fa; padding: 4px 10px; border-radius: 20px;">
+                    <span class="filter-label">Действие</span>
+                    <select id="action-action-filter" class="filter-select-mini" style="width: auto; min-width: 120px; padding: 4px 6px;">
+                        <option value="">Все</option>
+                        ${actions.map(a => `<option value="${window.CCTV.UI.escapeHtml(a)}" ${this.actionLogFilters.actionFilter === a ? 'selected' : ''}>${window.CCTV.UI.escapeHtml(a)}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="filter-item" style="display: inline-flex; align-items: center; gap: 5px; background: #f8f9fa; padding: 4px 10px; border-radius: 20px;">
+                    <span class="filter-label">Таблица</span>
+                    <select id="action-table-filter" class="filter-select-mini" style="width: auto; min-width: 120px; padding: 4px 6px;">
+                        <option value="">Все</option>
+                        ${tables.map(t => `<option value="${window.CCTV.UI.escapeHtml(t)}" ${this.actionLogFilters.tableFilter === t ? 'selected' : ''}>${window.CCTV.UI.escapeHtml(t)}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            <button class="reset-filters-icon" onclick="window.resetAllFilters()" title="Сбросить все фильтры" style="flex-shrink: 0;">↻</button>
+        `;
+        container.innerHTML = html;
+        
+        // Обработчики событий
+        const startDateInput = document.getElementById('action-start-date');
+        const endDateInput = document.getElementById('action-end-date');
+        const userSelect = document.getElementById('action-user-filter');
+        const actionSelect = document.getElementById('action-action-filter');
+        const tableSelect = document.getElementById('action-table-filter');
+        
+        if (startDateInput && endDateInput) {
+            const dateHandler = () => {
+                this.actionLogFilters.startDate = startDateInput.value;
+                this.actionLogFilters.endDate = endDateInput.value;
+                window.CCTV.loadTable(this.tableName);
+                window.CCTV.AppState.saveState();
+            };
+            startDateInput.addEventListener('change', dateHandler);
+            endDateInput.addEventListener('change', dateHandler);
+        }
+        
+        if (userSelect) {
+            userSelect.addEventListener('change', () => {
+                this.actionLogFilters.userFilter = userSelect.value;
+                window.CCTV.loadTable(this.tableName);
+                window.CCTV.AppState.saveState();
+            });
+        }
+        
+        if (actionSelect) {
+            actionSelect.addEventListener('change', () => {
+                this.actionLogFilters.actionFilter = actionSelect.value;
+                window.CCTV.loadTable(this.tableName);
+                window.CCTV.AppState.saveState();
+            });
+        }
+        
+        if (tableSelect) {
+            tableSelect.addEventListener('change', () => {
+                this.actionLogFilters.tableFilter = tableSelect.value;
+                window.CCTV.loadTable(this.tableName);
+                window.CCTV.AppState.saveState();
+            });
+        }
     }
     
     async exportToExcel() {
@@ -206,15 +232,10 @@ class ActionLogTable extends window.CCTV.BaseTable {
                 body: JSON.stringify(exportData)
             });
             if (!response.ok) {
-                let errorText = await response.text();
                 window.CCTV.UI.showMessage(`Ошибка экспорта (${response.status})`, 'error');
                 return;
             }
             const blob = await response.blob();
-            if (!blob.type.includes('spreadsheetml.sheet')) {
-                window.CCTV.UI.showMessage('Сервер вернул некорректный файл', 'error');
-                return;
-            }
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;

@@ -1,5 +1,5 @@
 /**
- * analytics.js - Модуль аналитики (с кнопочными фильтрами)
+ * analytics.js - Модуль аналитики (с кнопочными фильтрами и прокруткой)
  */
 
 class AnalyticsView {
@@ -122,12 +122,25 @@ class AnalyticsView {
             </div>
         `;
         
+        // АП с прокруткой
         const apRow = document.createElement('div');
         apRow.style.display = 'flex';
         apRow.style.flexWrap = 'wrap';
         apRow.style.alignItems = 'center';
         apRow.style.gap = '8px';
-        apRow.innerHTML = `<span class="filter-buttons-title">🏭 АП:</span>`;
+        apRow.innerHTML = `<span class="filter-buttons-title">АП:</span>`;
+        const apButtonsDiv = document.createElement('div');
+        apButtonsDiv.style.display = 'flex';
+        apButtonsDiv.style.flexWrap = 'wrap';
+        apButtonsDiv.style.gap = '4px';
+        apButtonsDiv.style.maxHeight = '100px';
+        apButtonsDiv.style.overflowY = 'auto';
+        apButtonsDiv.style.alignContent = 'flex-start';
+        apButtonsDiv.style.border = '1px solid #e0e0e0';
+        apButtonsDiv.style.borderRadius = '4px';
+        apButtonsDiv.style.padding = '4px';
+        apButtonsDiv.style.background = '#fafafa';
+        apRow.appendChild(apButtonsDiv);
         
         const allApBtn = document.createElement('button');
         allApBtn.className = `filter-btn ${this.filters.ap_ids.size === 0 ? 'all-active' : ''}`;
@@ -138,7 +151,7 @@ class AnalyticsView {
             this.updateRegistratorFilterButtons();
             this.applyFiltersAndReload();
         };
-        apRow.appendChild(allApBtn);
+        apButtonsDiv.appendChild(allApBtn);
         
         this.aps.forEach(ap => {
             const btn = document.createElement('button');
@@ -150,20 +163,36 @@ class AnalyticsView {
                 } else {
                     this.filters.ap_ids.add(ap);
                 }
+                if (this.filters.ap_ids.size === this.aps.length) {
+                    this.filters.ap_ids.clear();
+                }
                 this.filters.registrator_ids.clear();
                 this.updateRegistratorFilterButtons();
                 this.applyFiltersAndReload();
             };
-            apRow.appendChild(btn);
+            apButtonsDiv.appendChild(btn);
         });
         
+        // Регистраторы с прокруткой
         const regRow = document.createElement('div');
         regRow.style.display = 'flex';
         regRow.style.flexWrap = 'wrap';
         regRow.style.alignItems = 'center';
         regRow.style.gap = '8px';
-        regRow.innerHTML = `<span class="filter-buttons-title">🎥 Регистраторы:</span>`;
-        this.regRow = regRow;
+        regRow.innerHTML = `<span class="filter-buttons-title">Регистраторы:</span>`;
+        const regButtonsDiv = document.createElement('div');
+        regButtonsDiv.style.display = 'flex';
+        regButtonsDiv.style.flexWrap = 'wrap';
+        regButtonsDiv.style.gap = '4px';
+        regButtonsDiv.style.maxHeight = '120px';
+        regButtonsDiv.style.overflowY = 'auto';
+        regButtonsDiv.style.alignContent = 'flex-start';
+        regButtonsDiv.style.border = '1px solid #e0e0e0';
+        regButtonsDiv.style.borderRadius = '4px';
+        regButtonsDiv.style.padding = '4px';
+        regButtonsDiv.style.background = '#fafafa';
+        regRow.appendChild(regButtonsDiv);
+        this.regRow = regButtonsDiv;
         
         filterDiv.appendChild(dateRow);
         filterDiv.appendChild(apRow);
@@ -206,10 +235,7 @@ class AnalyticsView {
         }
         visibleRegs.sort((a,b) => a.name.localeCompare(b.name));
         
-        while (this.regRow.children.length > 1) {
-            this.regRow.removeChild(this.regRow.lastChild);
-        }
-        
+        this.regRow.innerHTML = '';
         const allRegBtn = document.createElement('button');
         allRegBtn.className = `filter-btn ${this.filters.registrator_ids.size === 0 ? 'all-active' : ''}`;
         allRegBtn.textContent = 'Все регистраторы';
@@ -236,6 +262,9 @@ class AnalyticsView {
                     } else {
                         this.filters.registrator_ids.add(reg.id);
                     }
+                    if (this.filters.registrator_ids.size === visibleRegs.length) {
+                        this.filters.registrator_ids.clear();
+                    }
                     this.updateRegistratorFilterButtons();
                     this.applyFiltersAndReload();
                 };
@@ -245,18 +274,15 @@ class AnalyticsView {
     }
     
     async applyFiltersAndReload() {
-        await this.loadAnalyticsData();
-        const oldFilterDiv = this.container.querySelector('.analytics-filters');
         const dateFromInput = document.getElementById('analytics-date-from');
         const dateToInput = document.getElementById('analytics-date-to');
         if (dateFromInput && dateToInput) {
             this.filters.date_from = dateFromInput.value;
             this.filters.date_to = dateToInput.value;
         }
-        const children = [...this.container.children];
-        for (let child of children) {
-            if (child !== oldFilterDiv) child.remove();
-        }
+        await this.loadAnalyticsData();
+        this.container.innerHTML = '';
+        this.renderFilters();
         this.renderKPI();
         this.renderStatusDistribution();
         this.renderDailyStatus();
@@ -272,23 +298,23 @@ class AnalyticsView {
         kpiDiv.style.cssText = 'display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 30px;';
         kpiDiv.innerHTML = `
             <div class="kpi-card" style="background: #f8f9fa; padding: 15px; border-radius: 8px; min-width: 150px; text-align: center;">
-                <h3>📷 Камер</h3>
+                <h3>Камер</h3>
                 <div style="font-size: 32px; font-weight: bold;">${kpi.total_cameras}</div>
             </div>
             <div class="kpi-card" style="background: #f8f9fa; padding: 15px; border-radius: 8px; min-width: 150px; text-align: center;">
-                <h3>🎥 Регистраторов</h3>
+                <h3>Регистраторов</h3>
                 <div style="font-size: 32px; font-weight: bold;">${kpi.total_registrators}</div>
             </div>
             <div class="kpi-card" style="background: #f8f9fa; padding: 15px; border-radius: 8px; min-width: 150px; text-align: center;">
-                <h3>🏭 АП</h3>
+                <h3>АП</h3>
                 <div style="font-size: 32px; font-weight: bold;">${kpi.total_aps}</div>
             </div>
             <div class="kpi-card" style="background: #f8f9fa; padding: 15px; border-radius: 8px; min-width: 150px; text-align: center;">
-                <h3>📊 Охват за 7д</h3>
+                <h3>Охват за 7д</h3>
                 <div style="font-size: 32px; font-weight: bold;">${kpi.report_coverage_7d}%</div>
             </div>
             <div class="kpi-card" style="background: #f8f9fa; padding: 15px; border-radius: 8px; min-width: 150px; text-align: center;">
-                <h3>✅ Исправных</h3>
+                <h3>Исправных</h3>
                 <div style="font-size: 32px; font-weight: bold;">${kpi.healthy_percent}%</div>
             </div>
         `;
@@ -312,7 +338,7 @@ class AnalyticsView {
         
         const container = document.createElement('div');
         container.style.cssText = 'background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; max-width: 600px;';
-        container.innerHTML = '<h3>📊 Распределение состояний на выбранную дату</h3><canvas id="status-chart" style="height:300px; max-width:100%;"></canvas>';
+        container.innerHTML = '<h3>Распределение состояний на выбранную дату</h3><canvas id="status-chart" style="height:300px; max-width:100%;"></canvas>';
         this.container.appendChild(container);
         
         const canvas = container.querySelector('#status-chart');
@@ -351,7 +377,7 @@ class AnalyticsView {
         
         const container = document.createElement('div');
         container.style.cssText = 'background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px;';
-        container.innerHTML = '<h3>📈 Динамика состояний</h3><canvas id="trend-chart" style="height:300px; max-width:100%;"></canvas>';
+        container.innerHTML = '<h3>Динамика состояний</h3><canvas id="trend-chart" style="height:300px; max-width:100%;"></canvas>';
         this.container.appendChild(container);
         
         const canvas = container.querySelector('#trend-chart');
@@ -372,7 +398,7 @@ class AnalyticsView {
         
         const container = document.createElement('div');
         container.style.cssText = 'background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px;';
-        container.innerHTML = '<h3>🔧 Топ поломок</h3><canvas id="breakdown-chart" style="height:300px; max-width:100%;"></canvas>';
+        container.innerHTML = '<h3>Топ поломок</h3><canvas id="breakdown-chart" style="height:300px; max-width:100%;"></canvas>';
         this.container.appendChild(container);
         
         const canvas = container.querySelector('#breakdown-chart');
@@ -406,7 +432,7 @@ class AnalyticsView {
         `;
         const wrapper = document.createElement('div');
         wrapper.style.cssText = 'background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px;';
-        wrapper.innerHTML = '<h3>⚠️ Проблемные регистраторы</h3>';
+        wrapper.innerHTML = '<h3>Проблемные регистраторы</h3>';
         wrapper.appendChild(table);
         this.container.appendChild(wrapper);
     }
@@ -434,7 +460,7 @@ class AnalyticsView {
         `;
         const wrapper = document.createElement('div');
         wrapper.style.cssText = 'background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px;';
-        wrapper.innerHTML = '<h3>⏳ Самые долгие поломки</h3>';
+        wrapper.innerHTML = '<h3>Самые долгие поломки</h3>';
         wrapper.appendChild(table);
         this.container.appendChild(wrapper);
     }

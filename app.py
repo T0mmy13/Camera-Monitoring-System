@@ -347,7 +347,7 @@ def get_record(table_name, id):
 
 @app.route('/api/structure/<table_name>')
 @login_required
-@rate_limit(max_requests=50)
+#@rate_limit(max_requests=300, time_window=60)
 def get_table_structure(table_name):
     if not validate_table_name(table_name):
         return jsonify({'error': 'Invalid table name'}), 400
@@ -1177,4 +1177,4 @@ def get_analytics():
     })
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=8080)
+    app.run(debug=False, host='0.0.0.0', port=8080) 

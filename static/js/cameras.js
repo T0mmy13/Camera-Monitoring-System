@@ -48,7 +48,7 @@ class CamerasTable extends window.CCTV.BaseTable {
         }
         const columnsToDisplay = window.CCTV.Constants.COLUMN_ORDER['cam_camers'];
         let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
-            📊 Найдено записей: ${sortedData.length}
+            Найдено записей: ${sortedData.length}
         </div>`;
         html += '<table id="data-table"><thead><tr>';
         columnsToDisplay.forEach(col => {
