@@ -20,7 +20,7 @@ echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
 REM Запуск приложения
-echo Starting server at http://localhost:5000
+echo Starting server at http://localhost:5005
 echo Press Ctrl+C to stop the server
 echo ========================================
 echo.

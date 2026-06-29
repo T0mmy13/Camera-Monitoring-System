@@ -662,3 +662,30 @@ tr:hover {
     font-size: 13px;
     color: #555;
 }
+.no-select {
+    user-select: none;
+}
+.details-popup {
+    font-family: Arial, sans-serif;
+}
+.details-popup textarea {
+    font-family: inherit;
+}
+.details-popup button {
+    cursor: pointer;
+}
+
+/* ===== ДОБАВЛЕННЫЕ СТИЛИ ===== */
+.no-select {
+    user-select: none;
+}
+
+.details-popup {
+    font-family: Arial, sans-serif;
+}
+.details-popup textarea {
+    font-family: inherit;
+}
+.details-popup button {
+    cursor: pointer;
+}

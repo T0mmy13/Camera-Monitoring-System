@@ -1,5 +1,9 @@
 /**
  * analytics.js - Модуль аналитики (с кнопочными фильтрами и прокруткой)
+ * Изменения:
+ * - динамический заголовок с выбранным АП
+ * - выбор только одного АП
+ * - полный список камер в тултипе (без обрезания) с переносом строк
  */
 
 class AnalyticsView {
@@ -33,6 +37,7 @@ class AnalyticsView {
             this.createContainer();
         }
         this.container.style.display = 'block';
+        await window.CCTV.API.loadCamerasCache();
         await this.loadFiltersData();
         await this.loadAnalyticsData();
         this.render();
@@ -128,7 +133,15 @@ class AnalyticsView {
         apRow.style.flexWrap = 'wrap';
         apRow.style.alignItems = 'center';
         apRow.style.gap = '8px';
-        apRow.innerHTML = `<span class="filter-buttons-title">АП:</span>`;
+        
+        // === ИЗМЕНЕНИЕ 1: динамический заголовок ===
+        let selectedApLabel = 'все';
+        if (this.filters.ap_ids.size === 1) {
+            const selectedAp = Array.from(this.filters.ap_ids)[0];
+            selectedApLabel = `АП${selectedAp}`;
+        }
+        apRow.innerHTML = `<span class="filter-buttons-title" id="selected-ap-label">${selectedApLabel}</span>`;
+        
         const apButtonsDiv = document.createElement('div');
         apButtonsDiv.style.display = 'flex';
         apButtonsDiv.style.flexWrap = 'wrap';
@@ -153,18 +166,18 @@ class AnalyticsView {
         };
         apButtonsDiv.appendChild(allApBtn);
         
+        // === ИЗМЕНЕНИЕ 2: выбор только одного АП ===
         this.aps.forEach(ap => {
             const btn = document.createElement('button');
-            btn.className = `filter-btn ${this.filters.ap_ids.has(ap) ? 'active' : ''}`;
+            const isActive = this.filters.ap_ids.has(ap);
+            btn.className = `filter-btn ${isActive ? 'active' : ''}`;
             btn.textContent = `АП${ap}`;
             btn.onclick = () => {
                 if (this.filters.ap_ids.has(ap)) {
-                    this.filters.ap_ids.delete(ap);
-                } else {
-                    this.filters.ap_ids.add(ap);
-                }
-                if (this.filters.ap_ids.size === this.aps.length) {
                     this.filters.ap_ids.clear();
+                } else {
+                    this.filters.ap_ids.clear();
+                    this.filters.ap_ids.add(ap);
                 }
                 this.filters.registrator_ids.clear();
                 this.updateRegistratorFilterButtons();
@@ -172,6 +185,7 @@ class AnalyticsView {
             };
             apButtonsDiv.appendChild(btn);
         });
+        // === КОНЕЦ ИЗМЕНЕНИЙ ===
         
         // Регистраторы с прокруткой
         const regRow = document.createElement('div');
@@ -324,8 +338,9 @@ class AnalyticsView {
     renderStatusDistribution() {
         const dist = this.data.status_distribution;
         const labels = Object.keys(dist);
-        const values = Object.values(dist);
-        
+        const values = labels.map(label => dist[label].count);
+        const camIdsByLabel = labels.map(label => dist[label].cam_ids || []);
+
         const colorMap = {
             'Исправна': '#2ecc71',
             'Частично не исправна': '#f39c12',
@@ -335,19 +350,106 @@ class AnalyticsView {
             'Нет данных': '#bdc3c7'
         };
         const backgroundColors = labels.map(label => colorMap[label] || '#95a5a6');
-        
+
         const container = document.createElement('div');
         container.style.cssText = 'background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; max-width: 600px;';
         container.innerHTML = '<h3>Распределение состояний на выбранную дату</h3><canvas id="status-chart" style="height:300px; max-width:100%;"></canvas>';
         this.container.appendChild(container);
-        
+
         const canvas = container.querySelector('#status-chart');
         const ctx = canvas.getContext('2d');
         if (this.charts.statusChart) this.charts.statusChart.destroy();
+
+        const self = this;
         this.charts.statusChart = new Chart(ctx, {
             type: 'pie',
-            data: { labels, datasets: [{ data: values, backgroundColor: backgroundColors }] },
-            options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'right' } } }
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: backgroundColors,
+                    camLists: camIdsByLabel
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: { position: 'right' },
+                    tooltip: {
+                        // === ИЗМЕНЕНИЕ 3: увеличение размеров и многострочность ===
+                        bodyFont: { size: 12 },
+                        padding: 10,
+                        cornerRadius: 4,
+                        multiLine: true,
+                        maxWidth: 600,
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.parsed || 0;
+                                const camIds = context.dataset.camLists[context.dataIndex] || [];
+                                const filters = self.filters;
+                                const apFilterActive = filters.ap_ids.size > 0;
+                                const regFilterActive = filters.registrator_ids.size > 0;
+
+                                // Если нет фильтров → только количество
+                                if (!apFilterActive && !regFilterActive) {
+                                    return `${label}: ${value} шт.`;
+                                }
+
+                                // Форматирование имени камеры
+                                const formatCam = (camId) => {
+                                    const cam = window.CCTV.AppState.camerasCache[camId];
+                                    if (!cam) return `Камера #${camId}`;
+                                    const regFullName = window.CCTV.AppState.registratorsCache[cam.idreg];
+                                    if (!regFullName) return `CAM${cam.port}`;
+                                    const match = regFullName.match(/АП(\d+)_(\d+)/);
+                                    if (!match) return `CAM${cam.port}`;
+                                    const regNumber = match[2];
+                                    const camPort = cam.port;
+
+                                    // Если выбран ровно один регистратор → только порт
+                                    if (filters.registrator_ids.size === 1 && !apFilterActive) {
+                                        return `${camPort}`;
+                                    }
+                                    return `${regNumber}_${camPort}`;
+                                };
+
+                                // Полный список без обрезания
+                                const camNames = camIds.map(formatCam);
+                                // Формируем список с переносами через каждые ~50 символов
+                                let lines = [`${label}: ${value} шт.`];
+                                if (camNames.length > 0) {
+                                    let camListStr = camNames.join(', ');
+                                    // Разбиваем на строки для улучшения читаемости
+                                    const maxLineLength = 50;
+                                    let currentLine = '';
+                                    let finalLines = [];
+                                    camListStr.split(', ').forEach(name => {
+                                        if (currentLine.length + name.length + 2 > maxLineLength) {
+                                            if (currentLine) finalLines.push(currentLine.trim());
+                                            currentLine = name;
+                                        } else {
+                                            currentLine += (currentLine ? ', ' : '') + name;
+                                        }
+                                    });
+                                    if (currentLine) finalLines.push(currentLine.trim());
+                                    // Добавляем "Камеры:" перед первой строкой
+                                    if (finalLines.length === 1) {
+                                        lines.push(`Камеры: ${finalLines[0]}`);
+                                    } else {
+                                        lines.push(`Камеры: ${finalLines[0]}`);
+                                        for (let i = 1; i < finalLines.length; i++) {
+                                            lines.push(`        ${finalLines[i]}`);
+                                        }
+                                    }
+                                }
+                                return lines;
+                            }
+                        }
+                    }
+                }
+            }
         });
     }
     
@@ -386,7 +488,25 @@ class AnalyticsView {
         this.charts.trendChart = new Chart(ctx, {
             type: 'line',
             data: { labels, datasets },
-            options: { responsive: true, maintainAspectRatio: true, plugins: { tooltip: { mode: 'index', intersect: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Количество камер' } } } }
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Количество камер'
+                        }
+                    }
+                }
+            }
         });
     }
     

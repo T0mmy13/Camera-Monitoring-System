@@ -6,12 +6,17 @@ class CamerasTable extends window.CCTV.BaseTable {
     constructor() {
         super('cam_camers');
         this.currentRegistratorFilters = window.CCTV.AppState.currentRegistratorFilters;
-        this.registratorsData = {}; // id -> { count_ports, name }
+        this.registratorsData = {};
     }
 
     async loadRegistratorsData() {
         const response = await fetch('/api/data/cam_registrators');
         const data = await response.json();
+        if (data.error) {
+            window.CCTV.UI.showMessage('Ошибка загрузки регистраторов: ' + data.error, 'error');
+            this.registratorsData = {};
+            return;
+        }
         this.registratorsData = {};
         data.data.forEach(reg => {
             this.registratorsData[reg.id] = {
@@ -28,6 +33,11 @@ class CamerasTable extends window.CCTV.BaseTable {
         ]);
         const response = await fetch(`/api/data/${this.tableName}`);
         const data = await response.json();
+        if (data.error) {
+            window.CCTV.UI.showMessage('Ошибка загрузки камер: ' + data.error, 'error');
+            this.originalData = [];
+            return [];
+        }
         this.originalData = data.data;
         return this.originalData;
     }
@@ -235,7 +245,6 @@ class CamerasTable extends window.CCTV.BaseTable {
             return;
         }
 
-        // Проверка уникальности пары (idreg, port)
         const exists = this.originalData.some(cam => cam.idreg == regId && cam.port == port);
         if (exists) {
             window.CCTV.UI.showMessage(`Порт ${port} уже занят на этом регистраторе`, 'error');
@@ -339,7 +348,6 @@ class CamerasTable extends window.CCTV.BaseTable {
                 window.CCTV.UI.showMessage(`Порт должен быть от 1 до ${reg.count_ports} для выбранного регистратора`, 'error');
                 return;
             }
-            // Проверка уникальности, исключая текущую запись
             const exists = this.originalData.some(cam => cam.idreg == regId && cam.port == port && cam.id != id);
             if (exists) {
                 window.CCTV.UI.showMessage(`Порт ${port} уже занят на этом регистраторе`, 'error');

@@ -1,5 +1,11 @@
 /**
- * camera-report.js - Таблица отчётов камер (с оптимистической блокировкой)
+ * camera-report.js - Таблица отчётов камер (группировка по камере+день)
+ * Изменения:
+ * - в формах используется CONDITION_OPTIONS_FOR_FORMS (без "На текущий момент")
+ * - фильтр "На текущий момент" не сбрасывает выбранные АП и учитывает их при фильтрации
+ * - при активном режиме "На текущий момент" даты игнорируются, а АП/регистраторы/состояния работают
+ * - фильтр по АП теперь позволяет выбрать только один АП или все (множественный выбор отключён)
+ * - сортировка по умолчанию: по регистратору (АП+номер) и порту камеры
  */
 
 class CameraReportTable extends window.CCTV.BaseTable {
@@ -7,8 +13,11 @@ class CameraReportTable extends window.CCTV.BaseTable {
         super('cam_camera_report');
         this.reportFilters = window.CCTV.AppState.reportFilters;
         this.regContainer = null;
+        this.lastSelectedRegistratorId = null;
+        this.popup = null;
+        this.showLatestOnly = false;
     }
-    
+
     async loadData() {
         await Promise.all([
             window.CCTV.API.loadCamerasCache(),
@@ -19,16 +28,13 @@ class CameraReportTable extends window.CCTV.BaseTable {
         this.originalData = data.data;
         return this.originalData;
     }
-    
+
     applyReportDataFilters(data) {
-        return data.filter(row => {
-            const rowDate = window.CCTV.UI.normalizeDate(row.recording_date);
-            let passed = true;
-            if (this.reportFilters.startDate && rowDate < this.reportFilters.startDate) passed = false;
-            if (passed && this.reportFilters.endDate && rowDate > this.reportFilters.endDate) passed = false;
+        let filtered = data.filter(row => {
             const cam = window.CCTV.AppState.camerasCache[row.id_cam];
             if (!cam) return false;
-            if (passed && this.reportFilters.apFilters.size > 0) {
+            let passed = true;
+            if (this.reportFilters.apFilters.size > 0) {
                 let regAp = null;
                 for (let [regId, regName] of Object.entries(window.CCTV.AppState.registratorsCache)) {
                     if (regId == cam.idreg) {
@@ -47,8 +53,32 @@ class CameraReportTable extends window.CCTV.BaseTable {
             }
             return passed;
         });
+
+        if (this.showLatestOnly) {
+            const maxDatePerCam = {};
+            filtered.forEach(row => {
+                const camId = row.id_cam;
+                const date = window.CCTV.UI.normalizeDate(row.recording_date);
+                if (!maxDatePerCam[camId] || date > maxDatePerCam[camId]) {
+                    maxDatePerCam[camId] = date;
+                }
+            });
+            return filtered.filter(row => {
+                const camId = row.id_cam;
+                const date = window.CCTV.UI.normalizeDate(row.recording_date);
+                return date === maxDatePerCam[camId];
+            });
+        } else {
+            return filtered.filter(row => {
+                const rowDate = window.CCTV.UI.normalizeDate(row.recording_date);
+                let passed = true;
+                if (this.reportFilters.startDate && rowDate < this.reportFilters.startDate) passed = false;
+                if (passed && this.reportFilters.endDate && rowDate > this.reportFilters.endDate) passed = false;
+                return passed;
+            });
+        }
     }
-    
+
     formatCameraDisplay(cam) {
         if (!cam) return '—';
         const regFullName = window.CCTV.AppState.registratorsCache[cam.idreg];
@@ -64,56 +94,274 @@ class CameraReportTable extends window.CCTV.BaseTable {
         else if (apFilterActive && !regFilterActive) return `${regNumber}_${camPort}`;
         else return `АП${apNumber}_${regNumber}_${camPort}`;
     }
-    
+
+    // ========== ИСПРАВЛЕННАЯ СОРТИРОВКА ПО УМОЛЧАНИЮ ==========
+    applySorting(data) {
+        // Если не задана пользовательская сортировка, сортируем по регистратору и порту
+        if (!this.currentSort.column || !this.currentSort.order) {
+            return [...data].sort((a, b) => {
+                const camA = window.CCTV.AppState.camerasCache[a.id_cam];
+                const camB = window.CCTV.AppState.camerasCache[b.id_cam];
+                if (!camA || !camB) return (camA ? -1 : 1);
+                
+                const regNameA = window.CCTV.AppState.registratorsCache[camA.idreg] || '';
+                const regNameB = window.CCTV.AppState.registratorsCache[camB.idreg] || '';
+                
+                // Сначала по регистратору (АП + номер)
+                if (regNameA !== regNameB) {
+                    return regNameA.localeCompare(regNameB);
+                }
+                // Затем по порту камеры
+                return camA.port - camB.port;
+            });
+        }
+        // Если задана пользовательская сортировка – используем базовый метод
+        return super.applySorting(data);
+    }
+
     render() {
         let workingData = [...this.originalData];
         workingData = this.applyReportDataFilters(workingData);
         let filteredData = this.applyFilters(workingData);
         let sortedData = this.applySorting(filteredData);
+
         if (sortedData.length === 0) {
             document.getElementById('table-content').innerHTML = '<p style="padding: 20px; text-align: center;">Нет данных</p>';
             return;
         }
-        const columnsToDisplay = window.CCTV.Constants.COLUMN_ORDER['cam_camera_report'];
+
+        const groups = new Map();
+        sortedData.forEach(row => {
+            const key = row.id_cam + '|' + row.recording_date;
+            if (!groups.has(key)) {
+                groups.set(key, {
+                    id_cam: row.id_cam,
+                    recording_date: row.recording_date,
+                    records: []
+                });
+            }
+            groups.get(key).records.push(row);
+        });
+
+        const groupList = Array.from(groups.values());
+
+        const columnsToDisplay = ['id_cam', 'condition', 'breakdown', 'recording_date', 'actions'];
+        const columnNames = {
+            'id_cam': 'Камера',
+            'condition': 'Состояние',
+            'breakdown': 'Поломки',
+            'recording_date': 'Дата',
+            'actions': 'Комментарий'
+        };
+
         let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
-            Найдено записей: ${sortedData.length}
+            Найдено записей: ${sortedData.length} (сгруппировано в ${groupList.length} строк)
         </div>`;
-        html += '<table id="data-table"><thead><tr>';
+        html += '<table id="data-table" class="no-select"><thead><tr>';
         columnsToDisplay.forEach(col => {
-            const displayName = window.CCTV.Constants.COLUMN_NAMES[col] || col;
             html += `<th style="position: relative;">
                 <div class="column-btn" style="cursor: default; opacity: 0.7;">
-                    ${window.CCTV.UI.escapeHtml(displayName)}
+                    ${window.CCTV.UI.escapeHtml(columnNames[col] || col)}
                 </div>
             </th>`;
         });
-        html += '<tr></thead><tbody>';
-        for (const row of sortedData) {
-            html += '<tr data-id="' + row.id + '">';
-            for (const col of columnsToDisplay) {
-                let value = row[col];
-                if (value === null) value = '';
-                if (col === 'id_cam') {
-                    const cam = window.CCTV.AppState.camerasCache[value];
-                    if (cam) {
-                        value = this.formatCameraDisplay(cam);
-                    } else {
-                        value = `Камера #${value}`;
-                    }
-                    html += `<td>${window.CCTV.UI.escapeHtml(value)}</td>`;
-                } else if (col === 'recording_date') {
-                    value = window.CCTV.UI.formatDateToDMY(value);
-                    html += `<td>${window.CCTV.UI.escapeHtml(value)}</td>`;
-                } else {
-                    html += `<td>${window.CCTV.UI.escapeHtml(value)}</td>`;
-                }
+        html += '</tr></thead><tbody>';
+
+        let prevCamId = null;
+
+        for (const group of groupList) {
+            const records = group.records;
+            const cam = window.CCTV.AppState.camerasCache[group.id_cam];
+
+            const conditions = records.map(r => r.condition).filter(Boolean);
+            const uniqueConditions = [...new Set(conditions)];
+            let conditionDisplay = uniqueConditions.length === 1 ? uniqueConditions[0] : 'разное';
+
+            const breakdowns = records
+                .map(r => r.breakdown)
+                .filter(b => b && b.trim() !== '')
+                .map(b => b.trim());
+            const uniqueBreakdowns = [...new Set(breakdowns)];
+            const breakdownDisplay = uniqueBreakdowns.length > 0 ? uniqueBreakdowns.join(', ') : '—';
+
+            const dateDisplay = window.CCTV.UI.formatDateToDMY(group.recording_date);
+
+            if (prevCamId !== null && prevCamId !== group.id_cam) {
+                html += `<tr style="border-top: 2px solid #000;"><td colspan="${columnsToDisplay.length}" style="padding:0; height:2px;"></td></tr>`;
             }
+            prevCamId = group.id_cam;
+
+            const groupId = group.id_cam + '|' + group.recording_date;
+
+            html += '<tr data-group="' + groupId + '">';
+
+            if (cam) {
+                html += `<td>${window.CCTV.UI.escapeHtml(this.formatCameraDisplay(cam))}</td>`;
+            } else {
+                html += `<td>Камера #${group.id_cam}</td>`;
+            }
+
+            html += `<td>${window.CCTV.UI.escapeHtml(conditionDisplay)}</td>`;
+            html += `<td>${window.CCTV.UI.escapeHtml(breakdownDisplay)}</td>`;
+            html += `<td>${window.CCTV.UI.escapeHtml(dateDisplay)}</td>`;
+            html += `<td>
+                <button class="group-comment-btn" data-group="${groupId}" style="background: #3498db; color: white; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 13px;">
+                    📝
+                </button>
+            </td>`;
+
             html += '</tr>';
         }
+
         html += '</tbody></table>';
         document.getElementById('table-content').innerHTML = html;
+
+        document.querySelectorAll('.group-comment-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const groupKey = btn.dataset.group;
+                const [id_cam, recording_date] = groupKey.split('|');
+                const group = groupList.find(g => g.id_cam == id_cam && g.recording_date === recording_date);
+                if (group) {
+                    this._showGroupDetailsPopup(group, e);
+                }
+            });
+        });
     }
-    
+
+    _showGroupDetailsPopup(group, event) {
+        this._closePopup();
+
+        const popup = document.createElement('div');
+        popup.className = 'details-popup';
+        popup.style.cssText = `
+            position: fixed;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            padding: 15px;
+            z-index: 10000;
+            max-width: 800px;
+            max-height: 500px;
+            overflow-y: auto;
+            min-width: 600px;
+        `;
+
+        const btnRect = event.target.getBoundingClientRect();
+        let left = btnRect.left;
+        let top = btnRect.bottom + 5;
+        if (left + 600 > window.innerWidth) left = window.innerWidth - 600 - 10;
+        if (top + 400 > window.innerHeight) top = btnRect.top - 400 - 5;
+        if (top < 10) top = 10;
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+
+        const cam = window.CCTV.AppState.camerasCache[group.id_cam];
+        const camDisplay = cam ? this.formatCameraDisplay(cam) : `Камера #${group.id_cam}`;
+        const dateDisplay = window.CCTV.UI.formatDateToDMY(group.recording_date);
+
+        const canEdit = window.CCTV.UI.canEditCurrentTable();
+
+        let detailsHtml = `
+            <div style="font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+                ${window.CCTV.UI.escapeHtml(camDisplay)} — ${window.CCTV.UI.escapeHtml(dateDisplay)}
+            </div>
+            <div style="margin-bottom: 10px; font-size: 13px; color: #555;">
+                Всего записей в группе: ${group.records.length}
+            </div>
+            <table style="width:100%; border-collapse: collapse; font-size: 13px; table-layout: fixed;">
+                <colgroup>
+                    <col style="width: 15%;">
+                    <col style="width: 25%;">
+                    <col style="width: 45%;">
+                    ${canEdit ? '<col style="width: 15%;">' : ''}
+                </colgroup>
+                <thead>
+                    <tr style="background: #f5f5f5;">
+                        <th style="padding: 4px 6px; text-align: left;">Состояние</th>
+                        <th style="padding: 4px 6px; text-align: left;">Поломка</th>
+                        <th style="padding: 4px 6px; text-align: left;">Комментарий</th>
+                        ${canEdit ? '<th style="padding: 4px 6px; text-align: center;">Действия</th>' : ''}
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        group.records.forEach(rec => {
+            detailsHtml += `
+                <tr>
+                    <td style="padding: 4px 6px;">${window.CCTV.UI.escapeHtml(rec.condition || '')}</td>
+                    <td style="padding: 4px 6px;">${window.CCTV.UI.escapeHtml(rec.breakdown || '')}</td>
+                    <td style="padding: 4px 6px; word-wrap: break-word; white-space: normal; max-width: 100%;">${window.CCTV.UI.escapeHtml(rec.comment || '')}</td>
+                    ${canEdit ? `
+                        <td style="padding: 4px 6px; text-align: center;">
+                            <button class="popup-edit-btn" data-id="${rec.id}" style="background: #3498db; color: white; border: none; border-radius: 3px; padding: 2px 8px; cursor: pointer; font-size: 12px; margin-right: 4px;">✎</button>
+                            <button class="popup-delete-btn" data-id="${rec.id}" style="background: #e74c3c; color: white; border: none; border-radius: 3px; padding: 2px 8px; cursor: pointer; font-size: 12px;">✕</button>
+                        </td>
+                    ` : ''}
+                </tr>
+            `;
+        });
+
+        detailsHtml += `
+                </tbody>
+            </table>
+            <div style="margin-top: 10px; text-align: right;">
+                <button class="popup-close-btn" style="background: #95a5a6; color: white; border: none; border-radius: 4px; padding: 5px 15px; cursor: pointer;">Закрыть</button>
+            </div>
+        `;
+
+        popup.innerHTML = detailsHtml;
+        document.body.appendChild(popup);
+        this.popup = popup;
+
+        popup.querySelectorAll('.popup-edit-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = parseInt(btn.dataset.id);
+                this._closePopup();
+                if (typeof this.showEditForm === 'function') {
+                    this.showEditForm(id);
+                }
+            });
+        });
+
+        popup.querySelectorAll('.popup-delete-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = parseInt(btn.dataset.id);
+                if (confirm('Вы уверены, что хотите удалить эту запись?')) {
+                    this._closePopup();
+                    this.deleteRecord(id);
+                }
+            });
+        });
+
+        popup.querySelector('.popup-close-btn').addEventListener('click', () => {
+            this._closePopup();
+        });
+
+        setTimeout(() => {
+            document.addEventListener('click', this._closePopupOnOutsideClick = (e) => {
+                if (popup && !popup.contains(e.target)) {
+                    this._closePopup();
+                }
+            });
+        }, 0);
+    }
+
+    _closePopup() {
+        if (this.popup) {
+            this.popup.remove();
+            this.popup = null;
+        }
+        if (this._closePopupOnOutsideClick) {
+            document.removeEventListener('click', this._closePopupOnOutsideClick);
+            this._closePopupOnOutsideClick = null;
+        }
+    }
+
+    // ==================== ФИЛЬТРЫ UI ====================
     buildFiltersUI() {
         const container = document.getElementById('filter-buttons-container');
         if (!container) return;
@@ -124,10 +372,8 @@ class CameraReportTable extends window.CCTV.BaseTable {
         const allAPs = window.CCTV.UI.getUniqueAPsFromCache();
         const allConditions = window.CCTV.Constants.CONDITION_OPTIONS;
         
-        // Новая структура: три строки
         let html = `
             <div style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
-                <!-- Строка 1: Дата и АП -->
                 <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
                     <div class="filter-item">
                         <span class="filter-label">📅 Период</span>
@@ -140,14 +386,12 @@ class CameraReportTable extends window.CCTV.BaseTable {
                         <div id="ap-buttons-container" style="display: flex; flex-wrap: wrap; gap: 4px; max-height: 100px; overflow-y: auto; align-content: flex-start; border: 1px solid #e0e0e0; border-radius: 4px; padding: 4px; background: #fafafa;"></div>
                     </div>
                 </div>
-                <!-- Строка 2: Регистраторы -->
                 <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
                     <div class="filter-item" style="display: flex; gap: 8px; align-items: center;">
                         <span class="filter-label">Регистраторы:</span>
                         <div id="registrator-buttons-container" style="display: flex; flex-wrap: wrap; gap: 4px; max-height: 120px; overflow-y: auto; align-content: flex-start; border: 1px solid #e0e0e0; border-radius: 4px; padding: 4px; background: #fafafa;"></div>
                     </div>
                 </div>
-                <!-- Строка 3: Состояние -->
                 <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
                     <div class="filter-item" style="display: flex; gap: 8px; align-items: center;">
                         <span class="filter-label">Состояние:</span>
@@ -167,7 +411,6 @@ class CameraReportTable extends window.CCTV.BaseTable {
         container.style.marginBottom = '20px';
         container.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
         
-        // Кнопки АП
         const apContainer = document.getElementById('ap-buttons-container');
         const allApBtn = document.createElement('button');
         allApBtn.className = `filter-btn ${this.reportFilters.apFilters.size === 0 ? 'all-active' : ''}`;
@@ -182,14 +425,17 @@ class CameraReportTable extends window.CCTV.BaseTable {
         };
         apContainer.appendChild(allApBtn);
         
+        // === ТОЛЬКО ОДИН АП ИЛИ ВСЕ ===
         allAPs.forEach(ap => {
             const btn = document.createElement('button');
-            btn.className = `filter-btn ${this.reportFilters.apFilters.has(ap) ? 'active' : ''}`;
+            const isActive = this.reportFilters.apFilters.has(ap);
+            btn.className = `filter-btn ${isActive ? 'active' : ''}`;
             btn.textContent = `АП${ap}`;
             btn.onclick = () => {
                 if (this.reportFilters.apFilters.has(ap)) {
-                    this.reportFilters.apFilters.delete(ap);
+                    this.reportFilters.apFilters.clear();
                 } else {
+                    this.reportFilters.apFilters.clear();
                     this.reportFilters.apFilters.add(ap);
                 }
                 this.reportFilters.registratorFilters.clear();
@@ -201,23 +447,43 @@ class CameraReportTable extends window.CCTV.BaseTable {
             apContainer.appendChild(btn);
         });
         
-        // Регистраторы
         const regContainer = document.getElementById('registrator-buttons-container');
         this.regContainer = regContainer;
         this.updateRegistratorButtonsByAp();
         
-        // Состояния
         const condContainer = document.getElementById('condition-buttons-container');
         allConditions.forEach(condition => {
             const btn = document.createElement('button');
-            btn.className = `filter-btn ${this.reportFilters.conditionFilters.has(condition) ? 'active' : ''}`;
+            const isActive = (condition === 'На текущий момент') 
+                ? this.showLatestOnly 
+                : this.reportFilters.conditionFilters.has(condition);
+            btn.className = `filter-btn ${isActive ? 'active' : ''}`;
             btn.textContent = condition;
             btn.onclick = () => {
+                if (condition === 'На текущий момент') {
+                    this.showLatestOnly = !this.showLatestOnly;
+                    if (this.showLatestOnly) {
+                        this.reportFilters.registratorFilters.clear();
+                        this.reportFilters.conditionFilters.clear();
+                        const today = window.CCTV.UI.getTodayDate();
+                        this.reportFilters.startDate = today;
+                        this.reportFilters.endDate = today;
+                        const startInput = document.getElementById('report-start-date');
+                        const endInput = document.getElementById('report-end-date');
+                        if (startInput) startInput.value = today;
+                        if (endInput) endInput.value = today;
+                    }
+                    this.buildFiltersUI();
+                    window.CCTV.loadTable(this.tableName);
+                    window.CCTV.AppState.saveState();
+                    return;
+                }
                 if (this.reportFilters.conditionFilters.has(condition)) {
                     this.reportFilters.conditionFilters.delete(condition);
                 } else {
                     this.reportFilters.conditionFilters.add(condition);
                 }
+                this.showLatestOnly = false;
                 this.updateConditionButtons();
                 window.CCTV.loadTable(this.tableName);
                 window.CCTV.AppState.saveState();
@@ -225,13 +491,13 @@ class CameraReportTable extends window.CCTV.BaseTable {
             condContainer.appendChild(btn);
         });
         
-        // Обработчики дат
         const startDateInput = document.getElementById('report-start-date');
         const endDateInput = document.getElementById('report-end-date');
         if (startDateInput && endDateInput) {
             const dateHandler = () => {
                 this.reportFilters.startDate = startDateInput.value;
                 this.reportFilters.endDate = endDateInput.value;
+                this.showLatestOnly = false;
                 window.CCTV.loadTable(this.tableName);
                 window.CCTV.AppState.saveState();
             };
@@ -239,7 +505,7 @@ class CameraReportTable extends window.CCTV.BaseTable {
             endDateInput.addEventListener('change', dateHandler);
         }
     }
-    
+
     updateRegistratorButtonsByAp() {
         if (!this.regContainer) return;
         let allRegs = Object.entries(window.CCTV.AppState.registratorsCache).map(([id, name]) => ({
@@ -287,21 +553,22 @@ class CameraReportTable extends window.CCTV.BaseTable {
             this.regContainer.appendChild(btn);
         });
     }
-    
+
     updateConditionButtons() {
         const condContainer = document.getElementById('condition-buttons-container');
         if (!condContainer) return;
         const buttons = condContainer.querySelectorAll('.filter-btn');
         buttons.forEach(btn => {
             const condition = btn.textContent;
-            if (this.reportFilters.conditionFilters.has(condition)) {
-                btn.classList.add('active');
+            if (condition === 'На текущий момент') {
+                btn.classList.toggle('active', this.showLatestOnly);
             } else {
-                btn.classList.remove('active');
+                btn.classList.toggle('active', this.reportFilters.conditionFilters.has(condition));
             }
         });
     }
-    
+
+    // ==================== ДОБАВЛЕНИЕ ====================
     showAddForm() {
         if (!window.CCTV.UI.canEditCurrentTable()) {
             window.CCTV.UI.showMessage('У вас нет прав на добавление записей', 'error');
@@ -310,14 +577,36 @@ class CameraReportTable extends window.CCTV.BaseTable {
         document.getElementById('modal-title').textContent = 'Добавление записи';
         this.buildAddFormFields();
     }
-    
+
     buildAddFormFields() {
+        const registrators = Object.entries(window.CCTV.AppState.registratorsCache).map(([id, name]) => ({
+            id: parseInt(id),
+            name: name,
+            ap: parseInt(name.match(/АП(\d+)_/)?.[1] || 0)
+        }));
+
+        let selectedRegId = null;
+        let selectedAp = null;
+
+        if (this.reportFilters.registratorFilters.size === 1) {
+            selectedRegId = Array.from(this.reportFilters.registratorFilters)[0];
+        } else if (this.reportFilters.apFilters.size === 1) {
+            selectedAp = Array.from(this.reportFilters.apFilters)[0];
+            const found = registrators.find(r => r.ap === selectedAp);
+            if (found) selectedRegId = found.id;
+        } else if (this.lastSelectedRegistratorId !== null) {
+            const exists = registrators.some(r => r.id === this.lastSelectedRegistratorId);
+            if (exists) selectedRegId = this.lastSelectedRegistratorId;
+        }
+
+        const conditionOptions = window.CCTV.Constants.CONDITION_OPTIONS_FOR_FORMS;
+
         let fieldsHtml = `
             <label>Регистратор:</label>
             <select id="registrator-select" onchange="window.CCTV.CameraReportTable.updateCamerasByRegistrator()" style="width: 100%; padding: 8px; margin: 5px 0;">
                 <option value="">Выберите регистратор</option>
-                ${Object.entries(window.CCTV.AppState.registratorsCache).map(([regId, regName]) => 
-                    `<option value="${regId}">${window.CCTV.UI.escapeHtml(regName)}</option>`
+                ${registrators.map(reg => 
+                    `<option value="${reg.id}" ${reg.id === selectedRegId ? 'selected' : ''}>${window.CCTV.UI.escapeHtml(reg.name)}</option>`
                 ).join('')}
             </select>
             <label>Камера:</label>
@@ -326,36 +615,46 @@ class CameraReportTable extends window.CCTV.BaseTable {
             </select>
             <div id="last-report-info" style="display: none; margin: 10px 0;"></div>
             <label>Состояние:</label>
-            <select id="condition-select" name="condition" required onchange="window.CCTV.CameraReportTable.toggleBreakdownField()" style="width: 100%; padding: 8px; margin: 5px 0;">
-                ${window.CCTV.Constants.CONDITION_OPTIONS.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+            <select id="condition-select" name="condition" required style="width: 100%; padding: 8px; margin: 5px 0;">
+                ${conditionOptions.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
             </select>
-            <div id="breakdown-field" style="display: none; margin: 10px 0;">
-                <label>Поломка (нажмите для выбора, нажмите еще раз для отмены):</label>
-                <div id="breakdown-multiselect" style="margin-top: 5px;"></div>
-            </div>
             <label>Примечание:</label>
             <textarea name="comment" rows="3" style="width: 100%; padding: 8px; margin: 5px 0;"></textarea>
             <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee;">
                 <div class="checkbox-group">
                     <label class="checkbox-label">
-                        <input type="checkbox" id="hide-today-cameras" onchange="window.CCTV.CameraReportTable.updateCamerasByRegistrator()">
+                        <input type="checkbox" id="hide-today-cameras" checked onchange="window.CCTV.CameraReportTable.updateCamerasByRegistrator()">
                         <span class="checkbox-text">Не показывать камеры, уже добавленные сегодня</span>
                     </label>
                 </div>
             </div>
         `;
         document.getElementById('modal-fields').innerHTML = fieldsHtml;
-        const breakdownDiv = document.getElementById('breakdown-multiselect');
-        if (breakdownDiv) {
-            breakdownDiv.innerHTML = this.createBreakdownSelect('breakdown-select-add', []);
-        }
         document.getElementById('modal').style.display = 'flex';
+
+        if (selectedRegId !== null) {
+            this.lastSelectedRegistratorId = selectedRegId;
+            this.updateCamerasByRegistrator().then(() => {
+                this.onCameraSelect();
+            });
+        } else {
+            const cameraSelect = document.getElementById('camera-select');
+            if (cameraSelect) cameraSelect.innerHTML = '<option value="">Сначала выберите регистратор</option>';
+        }
+
+        const regSelect = document.getElementById('registrator-select');
+        if (regSelect) {
+            regSelect.addEventListener('change', () => {
+                this.lastSelectedRegistratorId = regSelect.value ? parseInt(regSelect.value) : null;
+            });
+        }
+
         document.getElementById('edit-form').onsubmit = (e) => {
             e.preventDefault();
             this.addReportRecord();
         };
     }
-    
+
     async updateCamerasByRegistrator() {
         const registratorSelect = document.getElementById('registrator-select');
         const cameraSelect = document.getElementById('camera-select');
@@ -390,11 +689,11 @@ class CameraReportTable extends window.CCTV.BaseTable {
         const lastReportDiv = document.getElementById('last-report-info');
         if (lastReportDiv) lastReportDiv.style.display = 'none';
     }
-    
+
     async onCameraSelect() {
         await this.showLastReportInfo();
     }
-    
+
     async showLastReportInfo() {
         const cameraSelect = document.getElementById('camera-select');
         const lastReportDiv = document.getElementById('last-report-info');
@@ -421,7 +720,7 @@ class CameraReportTable extends window.CCTV.BaseTable {
             }
         }
     }
-    
+
     async getLastCameraReport(cameraId) {
         try {
             const response = await fetch(`/api/data/cam_camera_report`);
@@ -435,110 +734,38 @@ class CameraReportTable extends window.CCTV.BaseTable {
             return null;
         }
     }
-    
-    createBreakdownSelect(id, selectedValues = []) {
-        let html = `<div class="breakdown-select" id="${id}" style="border: 1px solid #ddd; border-radius: 4px; max-height: 150px; overflow-y: auto;">`;
-        window.CCTV.Constants.BREAKDOWN_OPTIONS.forEach(opt => {
-            const isSelected = selectedValues.includes(opt);
-            html += `
-                <div class="breakdown-option ${isSelected ? 'selected' : ''}" 
-                     data-value="${opt}"
-                     style="padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; ${isSelected ? 'background-color: #e0e0e0; color: #333; font-weight: 500;' : ''}"
-                     onclick="window.CCTV.CameraReportTable.toggleBreakdownOption(this)">
-                    ${opt}
-                </div>
-            `;
-        });
-        html += `</div>`;
-        return html;
-    }
-    
-    toggleBreakdownOption(element) {
-        const isSelected = element.classList.contains('selected');
-        if (isSelected) {
-            element.classList.remove('selected');
-            element.style.backgroundColor = '';
-            element.style.color = '';
-            element.style.fontWeight = '';
-        } else {
-            element.classList.add('selected');
-            element.style.backgroundColor = '#e0e0e0';
-            element.style.color = '#333';
-            element.style.fontWeight = '500';
-        }
-    }
-    
-    getSelectedBreakdowns(divId) {
-        const container = document.getElementById(divId);
-        if (!container) return [];
-        const selected = [];
-        container.querySelectorAll('.breakdown-option.selected').forEach(opt => {
-            selected.push(opt.getAttribute('data-value'));
-        });
-        return selected;
-    }
-    
-    clearBreakdownSelection(divId) {
-        const container = document.getElementById(divId);
-        if (!container) return;
-        container.querySelectorAll('.breakdown-option').forEach(opt => {
-            opt.classList.remove('selected');
-            opt.style.backgroundColor = '';
-            opt.style.color = '';
-            opt.style.fontWeight = '';
-        });
-    }
-    
-    toggleBreakdownField() {
-        const conditionSelect = document.getElementById('condition-select');
-        const breakdownDiv = document.getElementById('breakdown-field');
-        if (conditionSelect) {
-            const selectedCondition = conditionSelect.value;
-            breakdownDiv.style.display = (selectedCondition === 'Частично не исправна' || selectedCondition === 'Неисправна') ? 'block' : 'none';
-            if (breakdownDiv.style.display === 'none') {
-                this.clearBreakdownSelection('breakdown-select-add');
-            }
-        }
-    }
-    
+
     async addReportRecord() {
         const idCam = document.getElementById('camera-select').value;
         const condition = document.getElementById('condition-select').value;
         const comment = document.querySelector('textarea[name="comment"]').value;
-        const selectedBreakdowns = this.getSelectedBreakdowns('breakdown-select-add');
         if (!idCam || !condition) {
             window.CCTV.UI.showMessage('Пожалуйста, заполните все обязательные поля', 'error');
             return;
         }
         const currentDate = window.CCTV.UI.getTodayDate();
-        const promises = [];
-        if (selectedBreakdowns.length === 0) {
-            promises.push(API.createData(this.tableName, {
-                id_cam: idCam, condition: condition, breakdown: '', comment: comment, recording_date: currentDate
-            }));
-        } else {
-            selectedBreakdowns.forEach(breakdown => {
-                promises.push(API.createData(this.tableName, {
-                    id_cam: idCam, condition: condition, breakdown: breakdown, comment: comment, recording_date: currentDate
-                }));
-            });
-        }
         try {
-            const responses = await Promise.all(promises);
-            const allSuccess = responses.every(r => r.success !== false);
-            if (allSuccess) {
+            const result = await window.CCTV.API.createData(this.tableName, {
+                id_cam: idCam,
+                condition: condition,
+                breakdown: '',
+                comment: comment,
+                recording_date: currentDate
+            });
+            if (result.success) {
                 window.CCTV.UI.closeModal();
                 window.CCTV.loadTable(this.tableName);
                 window.CCTV.UI.showMessage('Запись успешно добавлена', 'success');
             } else {
-                window.CCTV.UI.showMessage('Ошибка при добавлении', 'error');
+                window.CCTV.UI.showMessage('Ошибка: ' + result.error, 'error');
             }
         } catch (error) {
             console.error('Error:', error);
             window.CCTV.UI.showMessage('Ошибка при добавлении', 'error');
         }
     }
-    
+
+    // ==================== РЕДАКТИРОВАНИЕ ====================
     async showEditForm(id) {
         if (!window.CCTV.UI.canEditCurrentTable()) {
             window.CCTV.UI.showMessage('У вас нет прав на редактирование', 'error');
@@ -554,10 +781,11 @@ class CameraReportTable extends window.CCTV.BaseTable {
             
             document.getElementById('modal-title').textContent = 'Редактирование отчёта';
             
+            const conditionOptions = window.CCTV.Constants.CONDITION_OPTIONS_FOR_FORMS;
+
             if (isAdmin) {
                 const cam = window.CCTV.AppState.camerasCache[record.id_cam];
                 const currentRegId = cam ? cam.idreg : null;
-                const currentBreakdowns = record.breakdown ? record.breakdown.split(',') : [];
                 let fieldsHtml = `
                     <label>Регистратор:</label>
                     <select id="registrator-select-edit" onchange="window.CCTV.CameraReportTable.updateCamerasByRegistratorForEdit()" style="width: 100%; padding: 8px; margin: 5px 0;">
@@ -571,24 +799,16 @@ class CameraReportTable extends window.CCTV.BaseTable {
                         <option value="">Сначала выберите регистратор</option>
                     </select>
                     <label>Состояние:</label>
-                    <select id="condition-select-edit" name="condition" required onchange="window.CCTV.CameraReportTable.toggleBreakdownFieldEdit()" style="width: 100%; padding: 8px; margin: 5px 0;">
-                        ${window.CCTV.Constants.CONDITION_OPTIONS.map(opt => 
+                    <select id="condition-select-edit" name="condition" required style="width: 100%; padding: 8px; margin: 5px 0;">
+                        ${conditionOptions.map(opt => 
                             `<option value="${opt}" ${record.condition === opt ? 'selected' : ''}>${opt}</option>`
                         ).join('')}
                     </select>
-                    <div id="breakdown-field-edit" style="display: ${(record.condition === 'Частично не исправна' || record.condition === 'Неисправна') ? 'block' : 'none'}; margin: 10px 0;">
-                        <label>Поломка (нажмите для выбора, нажмите еще раз для отмены):</label>
-                        <div id="breakdown-multiselect-edit" style="margin-top: 5px;"></div>
-                    </div>
                     <label>Примечание:</label>
                     <textarea name="comment" rows="3" style="width: 100%; padding: 8px; margin: 5px 0;">${window.CCTV.UI.escapeHtml(record.comment || '')}</textarea>
                     <input type="hidden" name="id" value="${id}">
                 `;
                 document.getElementById('modal-fields').innerHTML = fieldsHtml;
-                const breakdownDiv = document.getElementById('breakdown-multiselect-edit');
-                if (breakdownDiv) {
-                    breakdownDiv.innerHTML = this.createBreakdownSelect('breakdown-select-edit', currentBreakdowns);
-                }
                 if (currentRegId) {
                     await this.updateCamerasByRegistratorForEdit(currentRegId, record.id_cam);
                 }
@@ -623,7 +843,7 @@ class CameraReportTable extends window.CCTV.BaseTable {
             window.CCTV.UI.showMessage('Ошибка загрузки записи', 'error');
         }
     }
-    
+
     async updateCamerasByRegistratorForEdit(registratorId, selectedCamId = null) {
         const cameraSelect = document.getElementById('camera-select-edit');
         if (!registratorId) {
@@ -641,24 +861,11 @@ class CameraReportTable extends window.CCTV.BaseTable {
         });
         cameraSelect.innerHTML = options;
     }
-    
-    toggleBreakdownFieldEdit() {
-        const conditionSelect = document.getElementById('condition-select-edit');
-        const breakdownDiv = document.getElementById('breakdown-field-edit');
-        if (conditionSelect) {
-            const selectedCondition = conditionSelect.value;
-            breakdownDiv.style.display = (selectedCondition === 'Частично не исправна' || selectedCondition === 'Неисправна') ? 'block' : 'none';
-            if (breakdownDiv.style.display === 'none') {
-                this.clearBreakdownSelection('breakdown-select-edit');
-            }
-        }
-    }
-    
+
     async updateReportRecordFull(id) {
         const idCam = document.getElementById('camera-select-edit').value;
         const condition = document.getElementById('condition-select-edit').value;
         const comment = document.querySelector('textarea[name="comment"]').value;
-        const selectedBreakdowns = this.getSelectedBreakdowns('breakdown-select-edit');
         if (!idCam || !condition) {
             window.CCTV.UI.showMessage('Пожалуйста, заполните все обязательные поля', 'error');
             return;
@@ -666,28 +873,26 @@ class CameraReportTable extends window.CCTV.BaseTable {
         const currentDate = window.CCTV.UI.getTodayDate();
         try {
             await window.CCTV.API.deleteData(this.tableName, id);
-            const promises = [];
-            if (selectedBreakdowns.length === 0) {
-                promises.push(window.CCTV.API.createData(this.tableName, {
-                    id_cam: idCam, condition: condition, breakdown: '', comment: comment, recording_date: currentDate
-                }));
+            const result = await window.CCTV.API.createData(this.tableName, {
+                id_cam: idCam,
+                condition: condition,
+                breakdown: '',
+                comment: comment,
+                recording_date: currentDate
+            });
+            if (result.success) {
+                window.CCTV.UI.closeModal();
+                window.CCTV.loadTable(this.tableName);
+                window.CCTV.UI.showMessage('Запись успешно обновлена', 'success');
             } else {
-                selectedBreakdowns.forEach(breakdown => {
-                    promises.push(window.CCTV.API.createData(this.tableName, {
-                        id_cam: idCam, condition: condition, breakdown: breakdown, comment: comment, recording_date: currentDate
-                    }));
-                });
+                window.CCTV.UI.showMessage('Ошибка: ' + result.error, 'error');
             }
-            await Promise.all(promises);
-            window.CCTV.UI.closeModal();
-            window.CCTV.loadTable(this.tableName);
-            window.CCTV.UI.showMessage('Запись успешно обновлена', 'success');
         } catch (error) {
             console.error('Error updating report:', error);
             window.CCTV.UI.showMessage('Ошибка при обновлении', 'error');
         }
     }
-    
+
     async updateReportRecordCommentOnly(id, comment) {
         try {
             const result = await window.CCTV.API.saveData(this.tableName, id, { 
@@ -710,7 +915,21 @@ class CameraReportTable extends window.CCTV.BaseTable {
             window.CCTV.UI.showMessage('Ошибка при обновлении', 'error');
         }
     }
-    
+
+    async deleteRecord(id) {
+        if (!window.CCTV.UI.canEditCurrentTable()) {
+            window.CCTV.UI.showMessage('У вас нет прав на удаление', 'error');
+            return;
+        }
+        const result = await window.CCTV.API.deleteData(this.tableName, id);
+        if (result.success) {
+            window.CCTV.loadTable(this.tableName);
+            window.CCTV.UI.showMessage('Запись успешно удалена', 'success');
+        } else {
+            window.CCTV.UI.showMessage('Ошибка: ' + result.error, 'error');
+        }
+    }
+
     async exportToExcel() {
         if (Object.keys(window.CCTV.AppState.camerasCache).length === 0 || Object.keys(window.CCTV.AppState.registratorsCache).length === 0) {
             window.CCTV.UI.showMessage('Загрузка данных, повторите попытку через секунду', 'error');

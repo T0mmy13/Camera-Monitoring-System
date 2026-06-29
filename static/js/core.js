@@ -6,7 +6,7 @@ const CONSTANTS = {
     ROLE_TABLE_ACCESS: {
         'admin': ['cam_registrators', 'cam_camers', 'cam_camera_report', 'cam_users', 'cam_action_log'],
         'editor': ['cam_registrators', 'cam_camers', 'cam_camera_report'],
-        'user': ['cam_camera_report']
+        'user': ['cam_registrators', 'cam_camers', 'cam_camera_report']
     },
     ROLE_EDIT_ACCESS: {
         'admin': ['cam_registrators', 'cam_camers', 'cam_camera_report', 'cam_users'],
@@ -55,7 +55,10 @@ const CONSTANTS = {
         'cam_action_log': ['action_date', 'action_time', 'user', 'action', 'table_name', 'record_id', 'field_name', 'old_value', 'new_value'],
         'cam_camera_report': ['id_cam', 'breakdown', 'comment']
     },
-    CONDITION_OPTIONS: ['Исправна', 'Частично не исправна', 'Неисправна', 'Отключена', 'Проба'],
+    // Для фильтров – с "На текущий момент"
+    CONDITION_OPTIONS: ['Исправна', 'Частично не исправна', 'Неисправна', 'Отключена', 'На текущий момент'],
+    // Для форм – без "На текущий момент"
+    CONDITION_OPTIONS_FOR_FORMS: ['Исправна', 'Частично не исправна', 'Неисправна', 'Отключена'],
     BREAKDOWN_OPTIONS: ['Ч/б', 'Нет изображения', 'Пикселит', 'Помехи', 'Шум', 'Отдаёт фиолетовым', 'Плохая видимость'],
     HIDDEN_COLUMNS: ['id', 'ap', 'id_reg_on_ap', 'version', 'last_editor']
 };
@@ -180,14 +183,14 @@ const API = {
         return response.json();
     },
     async loadCamerasCache() {
-        const response = await fetch('/api/public/cameras');
+        const response = await fetch('/api/camers/cameras');
         const data = await response.json();
         AppState.camerasCache = {};
         data.forEach(cam => { AppState.camerasCache[cam.id] = cam; });
         return AppState.camerasCache;
     },
     async loadRegistratorsCache() {
-        const response = await fetch('/api/public/registrators');
+        const response = await fetch('/api/camers/registrators');
         const data = await response.json();
         AppState.registratorsCache = {};
         data.forEach(reg => {

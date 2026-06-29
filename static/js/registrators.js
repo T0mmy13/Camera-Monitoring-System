@@ -11,6 +11,11 @@ class RegistratorsTable extends window.CCTV.BaseTable {
     async loadData() {
         const response = await fetch(`/api/data/${this.tableName}`);
         const data = await response.json();
+        if (data.error) {
+            window.CCTV.UI.showMessage('Ошибка загрузки регистраторов: ' + data.error, 'error');
+            this.originalData = [];
+            return [];
+        }
         this.originalData = data.data.map(reg => ({
             ...reg,
             registrator_full: window.CCTV.UI.getRegistratorFullName(reg)
@@ -44,7 +49,6 @@ class RegistratorsTable extends window.CCTV.BaseTable {
             return;
         }
         
-        // Явно задаём колонки для отображения
         const columnsToDisplay = ['registrator_full', 'ip', 'type', 'count_ports', 'extensions', 'comment', 'condition'];
         
         let html = `<div style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #ddd; border-radius: 8px 8px 0 0; font-size: 13px; color: #555;">
@@ -75,7 +79,6 @@ class RegistratorsTable extends window.CCTV.BaseTable {
         const container = document.getElementById('filter-buttons-container');
         if (!container) return;
         
-        // Принудительно задаём стили для горизонтального расположения
         container.style.cssText = '';
         container.style.display = 'flex';
         container.style.alignItems = 'center';

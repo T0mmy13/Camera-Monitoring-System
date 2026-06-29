@@ -41,11 +41,11 @@ app.config.update(
 )
 
 DB_CONFIG = {
-    'dbname': os.environ.get('DB_NAME', 'postgres'),
-    'user': os.environ.get('DB_USER', 'postgres'),
-    'password': os.environ.get('DB_PASSWORD', 'qwerty'),
-    'host': os.environ.get('DB_HOST', 'localhost'),
-    'port': os.environ.get('DB_PORT', '5432')
+    'dbname': "camers",
+    'user':  "camers",
+    'password': "qwerty",
+    'host': "web24.urbus.ru",
+    'port': "5432",
 }
 
 ALLOWED_TABLES = {
@@ -208,7 +208,7 @@ def can_view_table(table_name, role):
     if role == 'editor':
         return table_name not in ['cam_users', 'cam_action_log']
     if role == 'user':
-        return table_name == 'cam_camera_report'
+        return table_name in ['cam_registrators', 'cam_camers', 'cam_camera_report']
     return False
 
 def can_edit_table(table_name, role):
@@ -280,7 +280,7 @@ def get_table_data(table_name):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         if table_name == 'cam_action_log':
             cur.execute("""
                 SELECT al.id, al.time_action, al.action, al.table_name, al.record_id,
@@ -290,10 +290,10 @@ def get_table_data(table_name):
                 ORDER BY al.id
             """)
         else:
-            cur.execute(f'SELECT *, version FROM public.{table_name} ORDER BY id')
-        
+            cur.execute(f'SELECT *, version FROM camers.{table_name} ORDER BY id')
+
         data = cur.fetchall()
-        
+
         if table_name != 'cam_action_log':
             cur.execute("""
                 SELECT column_name FROM information_schema.columns
@@ -302,10 +302,10 @@ def get_table_data(table_name):
             columns = [col['column_name'] for col in cur.fetchall()]
         else:
             columns = ['action_date', 'action_time', 'user', 'action', 'table_name', 'record_id', 'field_name', 'old_value', 'new_value']
-        
+
         cur.close()
         conn.close()
-        
+
         formatted_data = []
         for row in data:
             row_dict = dict(row)
@@ -317,7 +317,7 @@ def get_table_data(table_name):
             if table_name == 'cam_users' and 'password' in row_dict:
                 row_dict['password'] = '••••••'
             formatted_data.append(row_dict)
-        
+
         return jsonify({'data': formatted_data, 'columns': columns})
     except Exception as e:
         app.logger.error(f'Error getting table data: {e}')
@@ -332,7 +332,7 @@ def get_record(table_name, id):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(f'SELECT *, version FROM public.{table_name} WHERE id = %s', (id,))
+        cur.execute(f'SELECT *, version FROM camers.{table_name} WHERE id = %s', (id,))
         record = cur.fetchone()
         cur.close()
         conn.close()
@@ -377,43 +377,43 @@ def get_table_structure(table_name):
 def add_record(table_name):
     if not validate_table_name(table_name):
         return jsonify({'error': 'Invalid table name'}), 400
-    
+
     try:
         data = request.json
         if 'id' in data:
             del data['id']
-        
+
         validation_errors = validate_record_data(table_name, data)
         if validation_errors:
             return jsonify({'success': False, 'error': ', '.join(validation_errors)}), 400
-        
+
         if table_name == 'cam_users' and 'password' in data:
             data['password'] = hash_password(data['password'])
-        
+
         for col in data.keys():
             if not validate_column_name(col):
                 return jsonify({'success': False, 'error': 'Invalid column name'}), 400
-        
+
         columns = list(data.keys())
         values = list(data.values())
         placeholders = ','.join(['%s'] * len(columns))
         columns_str = ','.join(columns)
-        
+
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(f"""
-            INSERT INTO public.{table_name} ({columns_str})
+            INSERT INTO camers.{table_name} ({columns_str})
             VALUES ({placeholders}) RETURNING id
         """, values)
         new_id = cur.fetchone()['id']
         conn.commit()
         cur.close()
         conn.close()
-        
+
         log_action(session['user_id'], "Добавление записи", table_name, new_id)
         app.logger.info(f'Record added: {table_name}:{new_id} by user_id={session["user_id"]}')
         return jsonify({'success': True, 'id': new_id})
-        
+
     except Exception as e:
         app.logger.error(f'Error adding record: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -424,24 +424,24 @@ def add_record(table_name):
 def update_record(table_name, id):
     if not validate_table_name(table_name):
         return jsonify({'error': 'Invalid table name'}), 400
-    
+
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(f'SELECT * FROM public.{table_name} WHERE id = %s', (id,))
+        cur.execute(f'SELECT * FROM camers.{table_name} WHERE id = %s', (id,))
         old_record = cur.fetchone()
         if not old_record:
             cur.close()
             conn.close()
             return jsonify({'error': 'Record not found'}), 404
-        
+
         data = request.json
         if 'id' in data:
             del data['id']
-        
+
         client_version = data.pop('version', None)
         current_version = old_record.get('version', 0)
-        
+
         if client_version is not None and client_version != current_version:
             cur.close()
             conn.close()
@@ -449,7 +449,7 @@ def update_record(table_name, id):
                 'success': False,
                 'error': 'Запись была изменена другим пользователем. Обновите страницу и повторите попытку.'
             }), 409
-        
+
         role = session.get('role')
         if role == 'editor' and table_name == 'cam_camera_report':
             allowed_fields = {'comment'}
@@ -458,31 +458,31 @@ def update_record(table_name, id):
                 cur.close()
                 conn.close()
                 return jsonify({'success': False, 'error': 'Редактор может изменять только поле "Примечание"'}), 403
-        
+
         validation_errors = validate_record_data(table_name, data)
         if validation_errors:
             return jsonify({'success': False, 'error': ', '.join(validation_errors)}), 400
-        
+
         if table_name == 'cam_users' and 'password' in data:
             if data['password'] == '••••••' or not data['password']:
                 del data['password']
             else:
                 data['password'] = hash_password(data['password'])
-        
+
         for col in data.keys():
             if not validate_column_name(col):
                 return jsonify({'success': False, 'error': 'Invalid column name'}), 400
-        
+
         if not data:
             cur.close()
             conn.close()
             return jsonify({'error': 'No data to update'}), 400
-        
+
         set_clause = ','.join([f"{key}=%s" for key in data.keys()])
         values = list(data.values()) + [id]
-        cur.execute(f"UPDATE public.{table_name} SET {set_clause} WHERE id = %s", values)
+        cur.execute(f"UPDATE camers.{table_name} SET {set_clause} WHERE id = %s", values)
         conn.commit()
-        
+
         user_id = session['user_id']
         for key, new_value in data.items():
             old_value = old_record.get(key)
@@ -490,12 +490,12 @@ def update_record(table_name, id):
             new_val_str = '' if new_value is None else str(new_value)
             if old_val_str != new_val_str:
                 log_action(user_id, "Изменение поля", table_name, id, key, old_val_str, new_val_str)
-        
+
         cur.close()
         conn.close()
         app.logger.info(f'Record updated: {table_name}:{id} by user_id={user_id}')
         return jsonify({'success': True})
-        
+
     except Exception as e:
         app.logger.error(f'Error updating record: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -506,12 +506,12 @@ def update_record(table_name, id):
 def delete_record(table_name, id):
     if not validate_table_name(table_name):
         return jsonify({'error': 'Invalid table name'}), 400
-    
+
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         log_action(session['user_id'], "Удаление записи", table_name, id)
-        cur.execute(f'DELETE FROM public.{table_name} WHERE id = %s', (id,))
+        cur.execute(f'DELETE FROM camers.{table_name} WHERE id = %s', (id,))
         conn.commit()
         cur.close()
         conn.close()
@@ -521,14 +521,14 @@ def delete_record(table_name, id):
         app.logger.error(f'Error deleting record: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/public/cameras')
+@app.route('/api/camers/cameras')
 @login_required
 @rate_limit(max_requests=100)
-def get_public_cameras():
+def get_camers_cameras():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT id, port, location, idreg FROM public.cam_camers ORDER BY id')
+        cur.execute('SELECT id, port, location, idreg FROM camers.cam_camers ORDER BY id')
         cameras = cur.fetchall()
         cur.close()
         conn.close()
@@ -537,14 +537,14 @@ def get_public_cameras():
         app.logger.error(f'Error getting cameras: {e}')
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/public/registrators')
+@app.route('/api/camers/registrators')
 @login_required
 @rate_limit(max_requests=100)
-def get_public_registrators():
+def get_camers_registrators():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT id, ap, id_reg_on_ap FROM public.cam_registrators ORDER BY id')
+        cur.execute('SELECT id, ap, id_reg_on_ap FROM camers.cam_registrators ORDER BY id')
         registrators = cur.fetchall()
         cur.close()
         conn.close()
@@ -560,15 +560,15 @@ def export_excel():
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Отчет по камерам"
-    
+
     headers = ['АП', 'Регистратор', 'Камера', 'Тип', 'Расположение', 'Расширение', 'Состояние', 'Тип поломки', 'Дата записи']
     ws.append(headers)
-    
+
     for col in range(1, len(headers) + 1):
         cell = ws.cell(row=1, column=col)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
-    
+
     for row in data:
         ws.append([
             row.get('АП', ''),
@@ -581,15 +581,15 @@ def export_excel():
             row.get('Тип поломки', ''),
             row.get('Дата записи', '')
         ])
-    
+
     column_widths = [8, 12, 8, 12, 25, 12, 15, 20, 12]
     for i, width in enumerate(column_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
-    
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-    
+
     app.logger.info(f'Excel export: camera_report by user_id={session["user_id"]}')
     return send_file(
         output,
@@ -605,15 +605,15 @@ def export_action_log_excel():
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Журнал действий"
-    
+
     headers = ['Дата', 'Время', 'Пользователь', 'Действие', 'Таблица', 'ID записи', 'Поле', 'Было', 'Стало']
     ws.append(headers)
-    
+
     for col in range(1, len(headers) + 1):
         cell = ws.cell(row=1, column=col)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
-    
+
     for row in data:
         ws.append([
             row.get('Дата', ''),
@@ -626,15 +626,15 @@ def export_action_log_excel():
             row.get('Было', ''),
             row.get('Стало', '')
         ])
-    
+
     column_widths = [12, 10, 15, 20, 15, 10, 15, 30, 30]
     for i, width in enumerate(column_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
-    
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-    
+
     app.logger.info(f'Excel export: action_log by user_id={session["user_id"]}')
     return send_file(
         output,
@@ -652,22 +652,22 @@ def get_analytics():
     date_to_str = request.args.get('date_to')
     ap_ids = request.args.getlist('ap_ids')
     registrator_ids = request.args.getlist('registrator_ids')
-    
+
     if not date_from_str or not date_to_str:
         return jsonify({'error': 'date_from and date_to required'}), 400
-    
+
     try:
         date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
         date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
     except ValueError:
         return jsonify({'error': 'Invalid date format'}), 400
-    
+
     if date_from > date_to:
         return jsonify({'error': 'date_from must be <= date_to'}), 400
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     # Определяем тип фильтра
     use_ap_filter = False
     use_reg_filter = False
@@ -678,7 +678,7 @@ def get_analytics():
     elif ap_ids:
         use_ap_filter = True
         filter_values = [int(x) for x in ap_ids]
-    
+
     # --- KPI ---
     if use_reg_filter:
         cur.execute("""
@@ -710,7 +710,7 @@ def get_analytics():
     total_cameras = kpi_row['total_cameras'] or 0
     total_registrators = kpi_row['total_registrators'] or 0
     total_aps = kpi_row['total_aps'] or 0
-    
+
     # % отчётов за последние 7 дней
     week_ago = date_to - timedelta(days=7)
     if use_reg_filter:
@@ -747,7 +747,7 @@ def get_analytics():
         """, (week_ago, date_to))
     recent_count = cur.fetchone()['cnt'] or 0
     report_coverage_7d = round(recent_count / total_cameras * 100, 1) if total_cameras > 0 else 0
-    
+
     # % исправных на date_to
     if use_reg_filter:
         cur.execute("""
@@ -793,7 +793,7 @@ def get_analytics():
     status_row = cur.fetchone()
     healthy_count = status_row['healthy'] or 0
     healthy_percent = round(healthy_count / total_cameras * 100, 1) if total_cameras > 0 else 0
-    
+
     kpi = {
         'total_cameras': total_cameras,
         'total_registrators': total_registrators,
@@ -801,8 +801,8 @@ def get_analytics():
         'report_coverage_7d': report_coverage_7d,
         'healthy_percent': healthy_percent
     }
-    
-    # --- Распределение состояний на date_to ---
+
+    # --- Распределение состояний на date_to (с полным списком камер) ---
     if use_reg_filter:
         cur.execute("""
             WITH last_reports AS (
@@ -813,7 +813,7 @@ def get_analytics():
                 WHERE r.id = ANY(%s::int[])
                 ORDER BY c.id, rep.recording_date DESC
             )
-            SELECT condition, COUNT(*) as count
+            SELECT condition, array_agg(cam_id) as cam_ids, COUNT(*) as count
             FROM last_reports
             GROUP BY condition
         """, (date_to, filter_values))
@@ -827,7 +827,7 @@ def get_analytics():
                 WHERE r.ap = ANY(%s::int[])
                 ORDER BY c.id, rep.recording_date DESC
             )
-            SELECT condition, COUNT(*) as count
+            SELECT condition, array_agg(cam_id) as cam_ids, COUNT(*) as count
             FROM last_reports
             GROUP BY condition
         """, (date_to, filter_values))
@@ -840,12 +840,19 @@ def get_analytics():
                 LEFT JOIN cam_camera_report rep ON rep.id_cam = c.id AND rep.recording_date <= %s
                 ORDER BY c.id, rep.recording_date DESC
             )
-            SELECT condition, COUNT(*) as count
+            SELECT condition, array_agg(cam_id) as cam_ids, COUNT(*) as count
             FROM last_reports
             GROUP BY condition
         """, (date_to,))
-    status_distribution = {row['condition']: row['count'] for row in cur.fetchall()}
-    
+    status_rows = cur.fetchall()
+    status_distribution = {}
+    for row in status_rows:
+        condition = row['condition']
+        status_distribution[condition] = {
+            'count': row['count'],
+            'cam_ids': row['cam_ids'] if row['cam_ids'] else []
+        }
+
     # --- Динамика состояний по дням ---
     if use_reg_filter:
         cur.execute("""
@@ -868,7 +875,7 @@ def get_analytics():
             JOIN cam_registrators r ON c.idreg = r.id
         """)
     camera_ids = [row['cam_id'] for row in cur.fetchall()]
-    
+
     if not camera_ids:
         cur.close()
         conn.close()
@@ -880,7 +887,7 @@ def get_analytics():
             'problem_registrators': [],
             'longest_breakdowns': []
         })
-    
+
     cur.execute("""
         SELECT id_cam as cam_id, recording_date, condition
         FROM cam_camera_report
@@ -888,23 +895,23 @@ def get_analytics():
         ORDER BY id_cam, recording_date
     """, [camera_ids, date_to])
     all_reports = cur.fetchall()
-    
+
     reports_by_cam = {}
     for rep in all_reports:
         cam_id = rep['cam_id']
         if cam_id not in reports_by_cam:
             reports_by_cam[cam_id] = []
         reports_by_cam[cam_id].append(rep)
-    
+
     date_list = []
     current = date_from
     while current <= date_to:
         date_list.append(current.isoformat())
         current += timedelta(days=1)
-    
+
     all_conditions = ['Исправна', 'Частично не исправна', 'Неисправна', 'Отключена', 'Проба']
     daily_counts = {date: {cond: 0 for cond in all_conditions} for date in date_list}
-    
+
     for cam_id, reports in reports_by_cam.items():
         reports.sort(key=lambda x: x['recording_date'])
         last_cond = 'Нет данных'
@@ -916,14 +923,14 @@ def get_analytics():
                 rep_idx += 1
             if last_cond != 'Нет данных':
                 daily_counts[date_str][last_cond] += 1
-    
+
     daily_status = []
     for date in date_list:
         entry = {'date': date}
         for cond in all_conditions:
             entry[cond] = daily_counts[date][cond]
         daily_status.append(entry)
-    
+
     # --- Топ поломок ---
     if use_reg_filter:
         cur.execute("""
@@ -978,7 +985,7 @@ def get_analytics():
                 breakdowns.append(part)
     breakdown_counter = Counter(breakdowns)
     top_breakdowns = [{'breakdown': k, 'count': v} for k, v in breakdown_counter.most_common(10)]
-    
+
     # --- Проблемные регистраторы ---
     if use_reg_filter:
         cur.execute("""
@@ -1047,7 +1054,7 @@ def get_analytics():
             'unhealthy': unhealthy,
             'unhealthy_percent': percent
         })
-    
+
     # --- Камеры с самой длительной непрерывной поломкой ---
     if use_reg_filter:
         cur.execute("""
@@ -1163,10 +1170,10 @@ def get_analytics():
             'days': row['days'],
             'start_date': row['start_date'].isoformat()
         })
-    
+
     cur.close()
     conn.close()
-    
+
     return jsonify({
         'kpi': kpi,
         'status_distribution': status_distribution,
@@ -1177,4 +1184,4 @@ def get_analytics():
     })
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=8080) 
+    app.run(debug=False, host='0.0.0.0', port=8080)

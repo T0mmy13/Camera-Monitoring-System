@@ -182,13 +182,30 @@ class UsersTable extends window.CCTV.BaseTable {
             window.CCTV.UI.showMessage('Нельзя удалить свою учётную запись', 'error');
             return;
         }
-        if (!confirm('Вы уверены, что хотите удалить этого пользователя?')) return;
-        const result = await window.CCTV.API.deleteData(this.tableName, id);
-        if (result.success) {
-            window.CCTV.loadTable(this.tableName);
-            window.CCTV.UI.showMessage('Запись успешно удалена', 'success');
-        } else {
-            window.CCTV.UI.showMessage('Ошибка: ' + result.error, 'error');
+        if (!confirm('Вы уверены, что хотите удалить этого пользователя? Все его действия в журнале также будут удалены.')) return;
+
+        try {
+            const logsResponse = await fetch('/api/data/cam_action_log');
+            const logsData = await logsResponse.json();
+            const userLogs = logsData.data.filter(log => log.user === record.username);
+            
+            if (userLogs.length > 0) {
+                window.CCTV.UI.showMessage(`Удаление ${userLogs.length} записей журнала...`, 'success');
+                for (const log of userLogs) {
+                    await window.CCTV.API.deleteData('cam_action_log', log.id);
+                }
+            }
+            
+            const result = await window.CCTV.API.deleteData(this.tableName, id);
+            if (result.success) {
+                window.CCTV.loadTable(this.tableName);
+                window.CCTV.UI.showMessage('Пользователь и его записи в журнале успешно удалены', 'success');
+            } else {
+                window.CCTV.UI.showMessage('Ошибка при удалении пользователя: ' + result.error, 'error');
+            }
+        } catch (error) {
+            console.error('Error deleting user with logs:', error);
+            window.CCTV.UI.showMessage('Ошибка при удалении', 'error');
         }
     }
 }

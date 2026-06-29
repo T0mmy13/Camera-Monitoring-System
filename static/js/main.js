@@ -98,7 +98,9 @@ function setupContextMenu(tableInstance) {
     const oldRows = document.querySelectorAll('#data-table tbody tr');
     oldRows.forEach(row => {
         row.removeEventListener('contextmenu', row._contextMenuHandler);
-        row.removeEventListener('dblclick', row._dblClickHandler);
+        if (row._dblClickHandler) {
+            row.removeEventListener('dblclick', row._dblClickHandler);
+        }
     });
     
     const canEdit = window.CCTV.UI.canEditCurrentTable();
@@ -114,15 +116,6 @@ function setupContextMenu(tableInstance) {
         };
         row.addEventListener('contextmenu', contextMenuHandler);
         row._contextMenuHandler = contextMenuHandler;
-        
-        if (canEdit && tableInstance.showEditForm) {
-            const dblClickHandler = (e) => {
-                e.preventDefault();
-                tableInstance.showEditForm(recordId);
-            };
-            row.addEventListener('dblclick', dblClickHandler);
-            row._dblClickHandler = dblClickHandler;
-        }
     });
     
     tableContainer.removeEventListener('contextmenu', tableContainer._emptyContextHandler);
@@ -251,6 +244,7 @@ window.setFilter = function(column, value) {
     }
 };
 
+// ИЗМЕНЁННАЯ функция сброса фильтров
 window.resetAllFilters = function() {
     const currentTable = window.CCTV.AppState.currentTable;
     
@@ -264,6 +258,10 @@ window.resetAllFilters = function() {
                 registratorFilters: new Set(),
                 conditionFilters: new Set()
             };
+            // ДОБАВЛЕНО: сбрасываем специальный режим
+            if (window.CCTV.CameraReportTable) {
+                window.CCTV.CameraReportTable.showLatestOnly = false;
+            }
             if (window.CCTV.CameraReportTable && typeof window.CCTV.CameraReportTable.buildFiltersUI === 'function') {
                 window.CCTV.CameraReportTable.reportFilters = window.CCTV.AppState.reportFilters;
                 window.CCTV.CameraReportTable.buildFiltersUI();
